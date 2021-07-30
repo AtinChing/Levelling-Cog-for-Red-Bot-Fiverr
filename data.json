@@ -1,0 +1,15 @@
+{
+    "levelfactor": 20,
+    "bonus_xp_rate": 2,
+    "bonus_days": [
+        "monday"
+    ],
+    "blacklisted": {
+        "channels": [
+            769525583226601486
+        ],
+        "categories": [
+            769525583226601484
+        ]
+    }
+}

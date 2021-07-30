@@ -7,8 +7,8 @@ from discord.utils import get
 import datetime
 import pymongo
 from pymongo import MongoClient
-
-
+import json
+import calendar # calendar libraray is used for quick conversion from int (returned by weekday()) to weekday str.
 
 class Levelcog(commands.Cog):   
 
@@ -18,8 +18,10 @@ class Levelcog(commands.Cog):
         self.client = None
         self.collection = None
         self.connected = False # Whether the bot is connected to the db.
-        self.xp_per_message = 20
-        self.bonus_xp_days = []
+        json_dict = json.load(open('data.json', 'r'))
+        self.xp_per_message = json_dict['levelfactor']
+        self.bonus_xp_rate = json_dict['bonus_xp_rate']
+        self.bonus_xp_days = json_dict['bonus_days']
         self.valid_days = ['sunday', 'monday', 'tuesday', 'wednesday', 'thursday', 'friday', 'saturday']
         self.connect_to_db()
 
@@ -75,6 +77,12 @@ class Levelcog(commands.Cog):
                     'background' : None 
         })
         return True # Could register user into the db    
+    
+    def update_user_in_db(self, user): # Updates the level field of a user, in the db, accordingly with the users total xp. Called whenever the normal_xp or bonus_xp of a user is changed.
+        cloned_dict = dict(self.collection.find_one({'_id' : user.id}))
+        self.collection.update_one({'_id' : user.id}, {'$set' : {'total_xp' : cloned_dict['normal_xp'] + cloned_dict['bonus_xp']}}) # Updates the users total_xp field, within the db, which is calculated by adding normal_xp and bonus_xp.
+        cloned_dict = dict(self.collection.find_one({'_id' : user.id})) # Refreshing the the dict to have the newly updated xp value
+        self.collection.update_one({'_id' : user.id}, {'$set' : {'level' : self.determine_level(cloned_dict['total_xp'])}}) # Then it updates the users level field, in the db, accordingly with the users total_xp.
 
     @commands.Cog.listener()
     async def on_message(self, message):
@@ -83,8 +91,10 @@ class Levelcog(commands.Cog):
         if self.connected: 
             entry = self.collection.find_one({'_id' : author.id}) 
             if entry != None:
-                self.collection.update_one({'_id' : author.id}, {'$inc' : {'xp' : self.xp_per_message}, '$set' : {'level' : self.determine_level(entry['xp'] + self.xp_per_message)}})
-
+                self.collection.update_one({'_id' : author.id}, {'$inc' : {'normal_xp' : self.xp_per_message}, '$set' : {'level' : self.determine_level(entry['xp'] + self.xp_per_message)}})
+                if calendar.day_name[datetime.now().weekday()].lower in json.load(open('data.json', 'r'))['bonus_days']: # If today is one of the bonus xp days:
+                    self.collection.update_one({'_id' : author.id}, {'$inc' : {'bonus_xp' : self.xp_per_message * self.bonus_xp_rate}})
+                    self.update_user_in_db(author)
     @commands.command()
     async def status(self, ctx, *args): # Returns embed containing the bot's status, like its connection to the database, latency etc.
         embed = discord.Embed(title='Bot Status')
@@ -182,29 +192,37 @@ class Levelcog(commands.Cog):
                     #await msg_send.add_reaction(":x:")
 
     @commands.command()
-    async def set_bonus_xp_days(self, ctx, args):
+    async def set_bonus_xp_days(self, ctx, *args):
         for arg in args:
             if self.connected and arg.lower() in self.valid_days: 
                 arg_lower = arg.lower()
                 if arg_lower not in self.bonus_xp_days: # If the current day entered IS NOT in the already active bonus days
                     self.bonus_xp_days.append(arg_lower) # We add it
+                    temp_dict = dict(json.load(open('data.json', 'r')))
+                    temp_dict['bonus_days'] = self.bonus_xp_days
+                    with open('data.json', 'w') as file:
+                        json.dump(temp_dict, file, indent=4)
                     await ctx.send(arg + " has been set as a bonus xp day!")
                 else: await ctx.send(arg + ' is already a bonus xp day!') # Otherwise it's already one of the active bonus xp days. 
             elif not self.connected: await ctx.send("The bot could not connect to the database.")
             else: await ctx.send('You sent in an invalid day!')
     
     @commands.command()
-    async def unset_bonus_xp_days(self, ctx, args):
+    async def unset_bonus_xp_days(self, ctx, *args):
         for arg in args:
-            if self.connected and arg.lower() in self.valid_keys:
+            if self.connected and arg.lower() in self.valid_days:
                 arg_lower = arg.lower()
                 if arg_lower in self.bonus_xp_days: # If the current day entered IS in the already active bonus days
                     self.bonus_xp_days.remove(arg_lower) # We remove it.
+                    temp_dict = dict(json.load(open('data.json', 'r')))
+                    temp_dict['bonus_days'] = self.bonus_xp_days
+                    with open('data.json', 'w') as file:
+                        json.dump(temp_dict, file, indent=4)
                     await ctx.send(arg + ' is no longer a bonus xp day!')
                 else: await ctx.send(arg + ' is not a bonus xp day!')
             elif not self.connected: await ctx.send("The bot could not connect to the database.")
             else: await ctx.send('You sent in an invalid day!')
-
+        
     @commands.command()
     async def set_xp_per_message(self, ctx, xp, args):
         try:
@@ -214,7 +232,60 @@ class Levelcog(commands.Cog):
             await ctx.send('You sent in an invalid number!')
             return
         self.xp_per_message = xp
+        # Updates the levelfactor field in data.json, so that it's value is used as the xp/levelfactor when the bot is started up next time. 
+        with open('data.json', 'r') as file: # Creates temp dict object to hold all the values
+            temp_dict = json.load(file) 
+        temp_dict['levelfactor'] = xp # Updates levelfactor value in cloned dict object
+        with open('data.json', 'w') as file: # Sets data.json to the newly updated cloned dict
+            json.dump(temp_dict, file, indent=4)
         await ctx.send('The amount of xp given per message has been set to ' + str(xp))
 
+    @commands.command()
+    async def set_bonus_xp_rate(self, ctx, rate, args):
+        try:
+            rate = int(rate)
+            if rate < 0: raise ValueError
+        except(ValueError):
+            await ctx.send('The rate you sent in an invalid number!')
+            return
+        self.bonus_xp_rate = rate
+        # Updates the levelfactor field in data.json, so that it's value is used as the xp/levelfactor when the bot is started up next time. 
+        with open('data.json', 'r') as file: # Creates temp dict object to hold all the values
+            temp_dict = json.load(file) 
+        temp_dict['levelfactor'] = rate # Updates levelfactor value in cloned dict object
+        with open('data.json', 'w') as file: # Sets data.json to the newly updated cloned dict
+            json.dump(temp_dict, file, indent=4)
+        await ctx.send('The amount rate of bonus xp has been set to ' + str(rate))    
+
+    @commands.command()
+    async def blacklist_channel(self, ctx, channel, *args):
+        try:
+            channel = self.bot.get_channel(int(channel.replace('<', '').replace('>', '').replace('#', '')))
+        except(): # if there was an error while trying to get the channel
+            await ctx.send('The channel you sent in could not be found!')
+            return
+        temp_dict = json.load(open('data.json', 'r'))
+        temp_dict['blacklisted']['channels'].append(channel.id)
+        with open('data.json', 'w') as file:
+            json.dump(temp_dict, file, indent=4)
+        await ctx.send(channel.mention + ' is now blacklisted. None of the messages sent in it will not gain xp for their sender!')
+
+    @commands.command()
+    async def blacklist_category(self, ctx, *args):
+        category_name = ''
+        for arg in args:
+            category_name += arg + ' '
+        category = get(ctx.guild.categories, name=category_name[:-1]) # :-1 to remove the last extra space
+        if category == None: # If category couldn't be found
+            await ctx.send('The category you sent in could not be found!')
+            return
+        else:
+            temp_dict = json.load(open('data.json', 'r'))
+            temp_dict['blacklisted']['categories'].append(category.id)
+            with open('data.json', 'w') as file:
+                json.dump(temp_dict, file, indent=4)
+            await ctx.send(category.mention + ' is now blacklisted. None of the messages sent in it will not gain xp for their sender!')
+
+        
 def setup(client):
-    client.add_cog(Levelcog(client))
+    client.add_cog(Levelcog(client)) 
