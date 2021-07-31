@@ -5,11 +5,10 @@
         "monday"
     ],
     "blacklisted": {
-        "channels": [
-            769525583226601486
-        ],
-        "categories": [
-            769525583226601484
-        ]
+        "channels": [],
+        "categories": []
+    },
+    "last_messages": {
+        "244361629754458113": "2021-07-31 02:51:34.225123"
     }
 }

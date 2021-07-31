@@ -85,16 +85,23 @@ class Levelcog(commands.Cog):
         self.collection.update_one({'_id' : user.id}, {'$set' : {'level' : self.determine_level(cloned_dict['total_xp'])}}) # Then it updates the users level field, in the db, accordingly with the users total_xp.
 
     @commands.Cog.listener()
-    async def on_message(self, message):
+    async def on_message(self, message : discord.Message):
         author = message.author
         if author.bot: return
         if self.connected: 
             entry = self.collection.find_one({'_id' : author.id}) 
-            if entry != None:
-                self.collection.update_one({'_id' : author.id}, {'$inc' : {'normal_xp' : self.xp_per_message}, '$set' : {'level' : self.determine_level(entry['xp'] + self.xp_per_message)}})
-                if calendar.day_name[datetime.now().weekday()].lower in json.load(open('data.json', 'r'))['bonus_days']: # If today is one of the bonus xp days:
+            json_dict = json.load(open('data.json', 'r'))
+            time_diff = datetime.datetime.now() - datetime.datetime.fromisoformat(json_dict['last_messages'][str(author.id)]) # The difference in time/time passed between the last message the user sent and the message they just sent.
+            json_dict['last_messages'][str(author.id)] =  str(datetime.datetime.now()) # Updating the last_message entry in the json.
+            if entry != None and message.channel.id not in json_dict['blacklisted']['channels'] and message.channel.category_id not in json_dict['blacklisted']['categories'] and time_diff >= datetime.timedelta(seconds=10): # If the entry could be extracted from the database and if the channel or category the message was sent isn't blacklisted.
+                self.collection.update_one({'_id' : author.id}, {'$inc' : {'normal_xp' : self.xp_per_message}, '$set' : {'level' : self.determine_level(entry['normal_xp'] + self.xp_per_message)}})
+                self.update_user_in_db(author)
+                if calendar.day_name[datetime.datetime.now().weekday()].lower in json_dict['bonus_days']: # If today is one of the bonus xp days:
                     self.collection.update_one({'_id' : author.id}, {'$inc' : {'bonus_xp' : self.xp_per_message * self.bonus_xp_rate}})
                     self.update_user_in_db(author)
+            with open('data.json', 'w') as file:
+                json.dump(json_dict, file, indent=4)
+   
     @commands.command()
     async def status(self, ctx, *args): # Returns embed containing the bot's status, like its connection to the database, latency etc.
         embed = discord.Embed(title='Bot Status')
@@ -122,21 +129,30 @@ class Levelcog(commands.Cog):
         try:
             level = int(level_arg)
             if level >= 1 and self.connected: # If connection to database is alive and level being added is more than 0
-                self.collection.update_one({'_id' : user.id}, {"$inc" : {'level' : level}, '$set' : {'xp' : self.determine_xp(level)}}) # Updating the member entry in the database according to their level.
+                current = dict(self.collection.find_one({'_id' : user.id})) # The current bonus xp the user has, according to the db.
+                current_bonus_xp = current['bonus_xp']
+                new_level = current['level'] + level
+                self.collection.update_one({'_id' : user.id}, {'$inc' : {'level' : level}, '$set' : {'normal_xp' : self.determine_xp(new_level) - current_bonus_xp, 'total_xp' : self.determine_xp(level)}}) # Updating the member entry in the database according to their level.
+                await ctx.send('Gave ' + str(level) + ' levels to ' + user.mention + "!")
             elif level <= 0: raise TypeError # Raising typeerror here so that it passes on to the except statement and sends the "invalid levels" message. 
             else: await ctx.send("Connection to database could not be made!") # Otherwise, the only scenario is that the bot is not connected to the database.
         except(TypeError):
             await ctx.send("Invalid amount of levels was passed in!")
-        except(AttributeError) as e: # CommandInvokeError is thrown if the user value could not be found or initialized.
-            await ctx.send(e)
+        except(AttributeError): # AttributeError is thrown if the user value could not be found or initialized.
+            await ctx.send('Invalid username was passed in!')
 
     @commands.command()
     async def subtract_level(self, ctx, user : discord.Member, level_arg : int):
         try:
             level = int(level_arg)
             if level >= 1 and self.connected:
-                self.connection.update_one({'_id' : user.id}, {'$inc' : {'level' : -level}, '$set' : {'xp' : self.determine_xp(-level)}})
-            elif level <= 0: raise TypeError # Raising typeerror here so that
+                current = dict(self.collection.find_one({'_id' : user.id})) # The current bonus xp the user has, according to the db.
+                current_bonus_xp = current['bonus_xp']
+                new_level = current['level'] - level
+                if new_level <= 0: raise TypeError # We can't minus the level all the way to to 0 or negative.
+                self.collection.update_one({'_id' : user.id}, {'$inc' : {'level' : -level}, '$set' : {'normal_xp' : self.determine_xp(new_level) - current_bonus_xp, 'total_xp' : self.determine_xp(level)}})
+                await ctx.send('Took away ' + str(level) + ' levels from ' + user.mention + "!")
+            elif level <= 0: raise TypeError # Raising typeerror here so that it sends the invalid amount of levels message
             else: await ctx.send("Connection to database could not be made!")    
         except(TypeError):
             await ctx.send("Invalid amount of levels was passed in!")
@@ -144,12 +160,15 @@ class Levelcog(commands.Cog):
             await ctx.send("Invalid username was passed in!")
 
     @commands.command()
-    async def set_level(self, ctx, user : discord.Member, level_arg : int):
+    async def set_level(self, ctx, user : discord.Member, level_arg : int, *args):
         try:
             level = int(level_arg)
             if level >= 1 and self.connected:
-                self.collection.update_one({'_id': user.id}, {'$set', {'level' : level, 'xp' : self.determine_xp(level)}})
-            elif level <= 0: raise TypeError
+                current_bonus_xp = dict(self.collection.find_one({'_id' : user.id}))['bonus_xp'] # The current bonus xp the user has, according to the db.
+                self.collection.update_one({'_id': user.id}, {'$set' : {'level' : level, 'normal_xp' : self.determine_xp(level) - current_bonus_xp, 'total_xp' : self.determine_xp(level)}})
+                await ctx.send('Set ' + user.mention + "'s level to " + str(level))
+            elif level <= 0: 
+                raise TypeError
             else: await ctx.send("Connection to database could not be made!") 
         except(TypeError):
             await ctx.send("Invalid amount of levels was passed in!")
@@ -160,7 +179,8 @@ class Levelcog(commands.Cog):
     async def reset_level(self, ctx, user : discord.Member):
         try:
             if self.connected:
-                self.collection.update_one({'_id' : user.id}, {'$set' : {'level' : 1, 'xp' : 0}})
+                self.collection.update_one({'_id' : user.id}, {'$set' : {'level' : 1, 'normal_xp' : 0, 'bonus_xp' : 0, 'total_xp' : 0}})
+                await ctx.send('Reset ' + user.mention + "'s level to 1!")
             else:
                 await ctx.send("Connections to database could not be made!")
         except(AttributeError):
@@ -261,31 +281,81 @@ class Levelcog(commands.Cog):
     async def blacklist_channel(self, ctx, channel, *args):
         try:
             channel = self.bot.get_channel(int(channel.replace('<', '').replace('>', '').replace('#', '')))
-        except(): # if there was an error while trying to get the channel
+        except(Exception): # if there was an error while trying to get the channel
             await ctx.send('The channel you sent in could not be found!')
             return
         temp_dict = json.load(open('data.json', 'r'))
-        temp_dict['blacklisted']['channels'].append(channel.id)
+        if channel.id not in temp_dict['blacklisted']['channels']:
+            temp_dict['blacklisted']['channels'].append(channel.id)
+        else:
+            await ctx.send('The channel you sent in is already blacklisted!')
+            return
         with open('data.json', 'w') as file:
             json.dump(temp_dict, file, indent=4)
-        await ctx.send(channel.mention + ' is now blacklisted. None of the messages sent in it will not gain xp for their sender!')
+        await ctx.send(channel.mention + ' is now blacklisted. None of the messages sent in it will gain xp for their sender!')
+
+    @commands.command()
+    async def unblacklist_channel(self, ctx, channel, *args):
+        try:
+            channel = self.bot.get_channel(int(channel.replace('<', '').replace('>', '').replace('#', '')))
+        except(Exception): # if there was an error while trying to get the channel
+            await ctx.send('The channel you sent in could not be found!')
+            return
+        temp_dict = json.load(open('data.json', 'r'))
+        if channel.id in temp_dict['blacklisted']['channels']: # Only remove it if it is in the blacklisted channels list
+            temp_dict['blacklisted']['channels'].remove(channel.id)
+        else:
+            await ctx.send('The channel you sent in is already not blacklisted!')
+            return 
+        with open('data.json', 'w') as file:
+            json.dump(temp_dict, file, indent=4)
+        await ctx.send(channel.mention + ' is no longer blacklisted. Messages sent in it will now gain xp for their sender!')
 
     @commands.command()
     async def blacklist_category(self, ctx, *args):
-        category_name = ''
-        for arg in args:
-            category_name += arg + ' '
-        category = get(ctx.guild.categories, name=category_name[:-1]) # :-1 to remove the last extra space
+        try:
+            category_id = int(args[0]) # Trying to convert arg into int by default, presuming its an int for ID
+            category = get(ctx.guild.categories, id=category_id)
+        except(ValueError): # if there was an error in trying to convert it, then it must be the category name that is being passed in=
+            category_name = ''
+            for arg in args:
+                category_name += arg + ' '
+            category = get(ctx.guild.categories, name=category_name[:-1]) # :-1 to remove the last extra space
         if category == None: # If category couldn't be found
             await ctx.send('The category you sent in could not be found!')
-            return
         else:
             temp_dict = json.load(open('data.json', 'r'))
-            temp_dict['blacklisted']['categories'].append(category.id)
+            if category.id not in temp_dict['blacklisted']['categories']:
+                temp_dict['blacklisted']['categories'].append(category.id)
+            else: 
+                await ctx.send('The category you sent in is already blacklisted!')
+                return
             with open('data.json', 'w') as file:
                 json.dump(temp_dict, file, indent=4)
-            await ctx.send(category.mention + ' is now blacklisted. None of the messages sent in it will not gain xp for their sender!')
+            await ctx.send(category.mention + ' is now blacklisted. None of the messages sent in it will gain xp for their sender!')
 
+    @commands.command()
+    async def unblacklist_category(self, ctx, *args):
+        try:
+            category_id = int(args[0]) # Trying to convert arg into int by default, presuming its an int for ID
+            category = get(ctx.guild.categories, id=category_id)
+        except(ValueError): # if there was an error in trying to convert it, then it must be the category name that is being passed in=
+            category_name = ''
+            for arg in args:
+                category_name += arg + ' '
+            category = get(ctx.guild.categories, name=category_name[:-1]) # :-1 to remove the last extra space
+        if category == None: # If category couldn't be found
+            await ctx.send('The category you sent in could not be found!')
+        else:
+            temp_dict = json.load(open('data.json', 'r'))
+            if category.id in temp_dict['blacklisted']['categories']: # Only remove it if it is in the blacklisted categories list
+                temp_dict['blacklisted']['categories'].remove(category.id)
+            else:
+                await ctx.send('The category you sent in is already not blacklisted!')
+                return
+            with open('data.json', 'w') as file:
+                json.dump(temp_dict, file, indent=4)
+            await ctx.send(category.mention + ' is no longer blacklisted. Messages sent in it will now gain xp for their sender!')
         
 def setup(client):
     client.add_cog(Levelcog(client)) 
