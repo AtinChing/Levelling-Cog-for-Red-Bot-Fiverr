@@ -1,6 +1,7 @@
 {
     "levelfactor": 20,
     "bonus_xp_rate": 2,
+    "voice_xp_rate" : 5,
     "bonus_days": [
         "monday"
     ],

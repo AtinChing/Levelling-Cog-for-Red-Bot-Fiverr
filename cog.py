@@ -1,4 +1,6 @@
 from asyncio import windows_events
+import asyncio
+from time import time
 import discord
 from discord import user
 from discord.ext import commands
@@ -20,10 +22,12 @@ class Levelcog(commands.Cog):
         self.connected = False # Whether the bot is connected to the db.
         json_dict = json.load(open('data.json', 'r'))
         self.xp_per_message = json_dict['levelfactor']
+        self.voice_xp_rate = json_dict['voice_xp_rate']
         self.bonus_xp_rate = json_dict['bonus_xp_rate']
         self.bonus_xp_days = json_dict['bonus_days']
         self.valid_days = ['sunday', 'monday', 'tuesday', 'wednesday', 'thursday', 'friday', 'saturday']
         self.connect_to_db()
+        asyncio.create_task(self.give_voice_xp(60))
 
     def connect_to_db(self):
         try:
@@ -73,7 +77,8 @@ class Levelcog(commands.Cog):
                     'level' : 1,
                     'normal_xp' : 0,
                     'bonus_xp' : 0,
-                    'total_xp' : 0, 
+                    'total_xp' : 0,
+                    'voice_xp' : 0, 
                     'background' : None 
         })
         return True # Could register user into the db    
@@ -83,6 +88,20 @@ class Levelcog(commands.Cog):
         self.collection.update_one({'_id' : user.id}, {'$set' : {'total_xp' : cloned_dict['normal_xp'] + cloned_dict['bonus_xp']}}) # Updates the users total_xp field, within the db, which is calculated by adding normal_xp and bonus_xp.
         cloned_dict = dict(self.collection.find_one({'_id' : user.id})) # Refreshing the the dict to have the newly updated xp value
         self.collection.update_one({'_id' : user.id}, {'$set' : {'level' : self.determine_level(cloned_dict['total_xp'])}}) # Then it updates the users level field, in the db, accordingly with the users total_xp.
+
+    async def give_voice_xp(self, delay): # Voice xp is given per minute, so this function is called every minute to check every single voice channel in the server and give users voice xp accordingly.
+        if self.connected:
+            for channel in self.bot.guilds[0].voice_channels: # We can just use bot.guilds[0] because the bot is only in 1 server.
+                json_dict = json.load(open('data.json', 'r'))
+                non_bot_members = [] # Non-bot users connected to the voice channel.
+                for m in channel.members: 
+                    if not m.bot: non_bot_members.append(m)
+                if len(non_bot_members) >= 2 and channel.id not in json_dict['blacklisted']['channels'] and channel.category.id not in json_dict['blacklisted']['channels']:
+                    for member in non_bot_members:
+                        if not member.bot and not member.voice.self_mute and not member.voice.self_deaf and self.collection.find_one({'_id' : member.id}) != None:
+                            self.collection.update_one({'_id' : member.id}, {'$inc' : {'voice_xp' : self.voice_xp_rate}})
+            time.sleep(delay)
+            asyncio.create_task(self.give_voice_xp(60)) # Check and give voice xp again in 1 minute/60 seconds.
 
     @commands.Cog.listener()
     async def on_message(self, message : discord.Message):
@@ -99,6 +118,7 @@ class Levelcog(commands.Cog):
                 if calendar.day_name[datetime.datetime.now().weekday()].lower in json_dict['bonus_days']: # If today is one of the bonus xp days:
                     self.collection.update_one({'_id' : author.id}, {'$inc' : {'bonus_xp' : self.xp_per_message * self.bonus_xp_rate}})
                     self.update_user_in_db(author)
+            elif entry == None: self.register_user(author)
             with open('data.json', 'w') as file:
                 json.dump(json_dict, file, indent=4)
    
@@ -176,7 +196,7 @@ class Levelcog(commands.Cog):
             await ctx.send("Invalid username was passed in!")
 
     @commands.command()
-    async def reset_level(self, ctx, user : discord.Member):
+    async def reset_level(self, ctx, user : discord.Member, *args):
         try:
             if self.connected:
                 self.collection.update_one({'_id' : user.id}, {'$set' : {'level' : 1, 'normal_xp' : 0, 'bonus_xp' : 0, 'total_xp' : 0}})
@@ -187,9 +207,35 @@ class Levelcog(commands.Cog):
             await ctx.send("Invalid username was passed in!")    
 
     @commands.command()
+    async def add_xp(self, ctx, user : discord.Member, xp_arg : int, *args):
+        try:
+            xp = int(xp_arg)
+            if xp >= 1 and self.connected:
+                self.collection.update_one({'_id' : user.id}, {'$inc' : {'normal_xp' : xp}}) # We increase the normal_xp field of the user, within the database, by the amount of xp passed in.
+                self.update_user_in_db(user) # Then we call update_user_in_db() to update the total_xp and level fields of the user within the database.
+            elif xp < 1: 
+                raise TypeError
+            else: await ctx.send("Connection to database could not be made!") 
+        except(TypeError):
+            await ctx.send("Invalid amount of xp was passed in!")
+            
+    @commands.command()
+    async def subtract_xp(self, ctx, user : discord.Member, xp_arg : int, *args):
+        try:
+            xp = int(xp_arg)
+            if xp >= 1 and self.connected:
+                self.collection.update_one({'_id' : user.id}, {'$inc' : {'normal_xp' : -xp}}) # We decrease the normal_xp field of the user, within the database, by the amount of xp passed in (by using the negation of the number of xp passed in).
+                self.update_user_in_db(user) # Then we call update_user_in_db() to update the total_xp and level fields of the user within the database.
+            elif xp < 1: 
+                raise TypeError
+            else: await ctx.send("Connection to database could not be made!") 
+        except(TypeError):
+            await ctx.send("Invalid amount of xp was passed in!")
+
+    @commands.command()
     async def leaderboard(self, ctx):
         if self.connected:
-            leaderboard = list(self.collection.find({}).sort('xp', pymongo.DESCENDING).limit(10))
+            leaderboard = list(self.collection.find({}).sort('total_xp', pymongo.DESCENDING).limit(10))
             total_count = len(leaderboard)
             embed_list = []
             i = 0
@@ -198,7 +244,7 @@ class Levelcog(commands.Cog):
                     embed = discord.Embed(title='Leaderboard ' + "(Showing " + str(i + 1) + " - " + str(len(leaderboard)) + ")", description='')
                     while i <= total_count - 1 and (i == 0 or i % 10 != 0):
                         user_dict = self.collection.find_one({'_id' : leaderboard[i]['_id']})
-                        embed.description += str(i + 1) + '. ' + self.bot.get_user(leaderboard[i]['_id']).mention + ' | Level ' + str(user_dict['level']) +' | ' + str(user_dict['xp'] - self.determine_xp(user_dict['level'])) + '/' + str(self.determine_xp(user_dict['level'] + 1) - self.determine_xp(user_dict['level'])) + '\n\n'
+                        embed.description += str(i + 1) + '. ' + self.bot.get_user(leaderboard[i]['_id']).mention + '\n' +  str(user_dict['total_xp']) + " XP  :microphone2: " + str(user_dict['voice_xp']) + "  :trophy: " + str(user_dict['bonus_xp'])  
                         i += 1
                     embed_list.append(embed)
                 total_count -= 10
@@ -244,7 +290,7 @@ class Levelcog(commands.Cog):
             else: await ctx.send('You sent in an invalid day!')
         
     @commands.command()
-    async def set_xp_per_message(self, ctx, xp, args):
+    async def set_xp_per_message(self, ctx, xp, *args):
         try:
             xp = int(xp) # Trying to convert the xp arg to a number
             if xp < 0: raise ValueError # We can't have negative xp for a number
@@ -261,21 +307,35 @@ class Levelcog(commands.Cog):
         await ctx.send('The amount of xp given per message has been set to ' + str(xp))
 
     @commands.command()
-    async def set_bonus_xp_rate(self, ctx, rate, args):
+    async def set_bonus_xp_rate(self, ctx, rate, *args):
+        try:
+            rate = int(rate)
+            if rate < 0: raise ValueError # Rates below 0 are invalid.
+        except(ValueError):
+            await ctx.send('The rate you sent in is an invalid number!')
+            return
+        self.bonus_xp_rate = rate
+        # Updates the levelfactor field in data.json, so that it's value is used as the xp/levelfactor when the bot is started up next time. 
+        temp_dict = json.load('data.json', 'r') # Creates temp dict object to hold all the values
+        temp_dict['bonus_xp_rate'] = rate # Updates levelfactor value in cloned dict object
+        with open('data.json', 'w') as file: # Sets data.json to the newly updated cloned dict
+            json.dump(temp_dict, file, indent=4)
+        await ctx.send('The rate of bonus xp has been set to ' + str(rate))    
+
+    @commands.command()
+    async def set_voice_xp_rate(self, ctx, rate, *args):
         try:
             rate = int(rate)
             if rate < 0: raise ValueError
         except(ValueError):
-            await ctx.send('The rate you sent in an invalid number!')
+            await ctx.send('The rate you sent in is an invalid number!')
             return
-        self.bonus_xp_rate = rate
-        # Updates the levelfactor field in data.json, so that it's value is used as the xp/levelfactor when the bot is started up next time. 
-        with open('data.json', 'r') as file: # Creates temp dict object to hold all the values
-            temp_dict = json.load(file) 
-        temp_dict['levelfactor'] = rate # Updates levelfactor value in cloned dict object
-        with open('data.json', 'w') as file: # Sets data.json to the newly updated cloned dict
+        self.voice_xp_rate = rate
+        temp_dict = json.load(open('data.json', 'r'))
+        temp_dict['voice_xp_rate'] = rate
+        with open('data.json', 'w') as file:
             json.dump(temp_dict, file, indent=4)
-        await ctx.send('The amount rate of bonus xp has been set to ' + str(rate))    
+        await ctx.send('The amount of voice xp given per minute has been set ' + str(rate))
 
     @commands.command()
     async def blacklist_channel(self, ctx, channel, *args):
