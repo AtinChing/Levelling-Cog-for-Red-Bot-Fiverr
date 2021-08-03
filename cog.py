@@ -1,4 +1,3 @@
-from asyncio import windows_events
 import asyncio
 from time import time
 import discord
@@ -11,6 +10,7 @@ import pymongo
 from pymongo import MongoClient
 import json
 import calendar # calendar libraray is used for quick conversion from int (returned by weekday()) to weekday str.
+import distutils.util
 
 class Levelcog(commands.Cog):   
 
@@ -25,6 +25,9 @@ class Levelcog(commands.Cog):
         self.voice_xp_rate = json_dict['voice_xp_rate']
         self.bonus_xp_rate = json_dict['bonus_xp_rate']
         self.bonus_xp_days = json_dict['bonus_days']
+        self.solo_get_xp = json_dict['solo_xp']
+        self.muted_get_xp = json_dict['muted_xp']
+        self.deafened_get_xp = json_dict['deafened_xp']
         self.valid_days = ['sunday', 'monday', 'tuesday', 'wednesday', 'thursday', 'friday', 'saturday']
         self.connect_to_db()
         asyncio.create_task(self.give_voice_xp(60))
@@ -96,9 +99,12 @@ class Levelcog(commands.Cog):
                 non_bot_members = [] # Non-bot users connected to the voice channel.
                 for m in channel.members: 
                     if not m.bot: non_bot_members.append(m)
-                if len(non_bot_members) >= 2 and channel.id not in json_dict['blacklisted']['channels'] and channel.category.id not in json_dict['blacklisted']['channels']:
+                if len(non_bot_members) == 1 and not self.solo_get_xp: continue # We skip the current channel if it only has 1 user connected to it and members, that are alone in vc, currently shouldn't get xp.
+                if len(non_bot_members) > 0 and channel.id not in json_dict['blacklisted']['channels'] and channel.category.id not in json_dict['blacklisted']['channels']:
                     for member in non_bot_members:
-                        if not member.bot and not member.voice.self_mute and not member.voice.self_deaf and self.collection.find_one({'_id' : member.id}) != None:
+                        if not self.muted_get_xp and member.voice.self_mute: continue # We skip/don't give the current member xp if they're muted and muted members currently shouldn't get xp.
+                        if not self.deafened_get_xp and member.voice.self_deafened: continue # We skip/don't give the current member xp if they're deafened and deafened members currently shouldn't get xp.
+                        if not member.bot and not member.voice.self_deaf and self.collection.find_one({'_id' : member.id}) != None:
                             self.collection.update_one({'_id' : member.id}, {'$inc' : {'voice_xp' : self.voice_xp_rate}})
             time.sleep(delay)
             asyncio.create_task(self.give_voice_xp(60)) # Check and give voice xp again in 1 minute/60 seconds.
@@ -336,6 +342,39 @@ class Levelcog(commands.Cog):
         with open('data.json', 'w') as file:
             json.dump(temp_dict, file, indent=4)
         await ctx.send('The amount of voice xp given per minute has been set ' + str(rate))
+
+    @commands.command()
+    async def set_solo_xp(self, ctx, solo, *args): # Whether users, that are alone in vc, should gain xp.
+        try:
+            solo = bool(distutils.util.strtobool(solo))
+            json_dict = json.load(open('data.json', 'r'))
+            json_dict['solo_xp'] = solo
+            with open('data.json', 'w') as file:
+                json.dump(json_dict, file, indent=4)
+        except(ValueError):
+            await ctx.send("The value you passed in was invalid! Please pass in true or false only. (Example: .set_solo_xp true)")
+
+    @commands.command()
+    async def set_muted_xp(self, ctx, muted, *args): # Whether users, that are muted in vc, should gain xp.
+        try:
+            muted = bool(distutils.util.strtobool(muted))
+            json_dict = json.load(open('data.json', 'r'))
+            json_dict['muted_xp'] = muted
+            with open('data.json', 'w') as file:
+                json.dump(json_dict, file, indent=4)
+        except(ValueError):
+            await ctx.send("The value you passed in was invalid! Please pass in true or false only. (Example: .set_muted_xp false)")
+
+    @commands.command()
+    async def set_deafened_xp(self, ctx, deaf, *args): # Whether users, that are deafened in vc, should gain xp.
+        try:
+            deaf = bool(distutils.util.strtobool(deaf))
+            json_dict = json.load(open('data.json', 'r'))
+            json_dict['deaf_xp'] = deaf
+            with open('data.json', 'w') as file:
+                json.dump(json_dict, file, indent=4)
+        except(ValueError):
+            await ctx.send("The value you passed in was invalid! Please pass in true or false only. (Example: .set_deaf_xp true)")
 
     @commands.command()
     async def blacklist_channel(self, ctx, channel, *args):

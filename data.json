@@ -2,6 +2,9 @@
     "levelfactor": 20,
     "bonus_xp_rate": 2,
     "voice_xp_rate" : 5,
+    "solo_xp" : false,
+    "muted_xp" : false,
+    "deafened_xp" : false,
     "bonus_days": [
         "monday"
     ],
