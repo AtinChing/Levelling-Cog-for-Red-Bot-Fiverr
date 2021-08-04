@@ -1,10 +1,10 @@
 {
     "levelfactor": 20,
     "bonus_xp_rate": 2,
-    "voice_xp_rate" : 5,
-    "solo_xp" : false,
-    "muted_xp" : false,
-    "deafened_xp" : false,
+    "voice_xp_rate": 5,
+    "solo_xp": true,
+    "muted_xp": false,
+    "deafened_xp": false,
     "bonus_days": [
         "monday"
     ],
@@ -13,6 +13,6 @@
         "categories": []
     },
     "last_messages": {
-        "244361629754458113": "2021-07-31 02:51:34.225123"
+        "244361629754458113": "2021-08-04 23:13:30.785820"
     }
 }

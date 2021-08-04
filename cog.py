@@ -1,5 +1,5 @@
 import asyncio
-from time import time
+import time
 import discord
 from discord import user
 from discord.ext import commands
@@ -11,6 +11,7 @@ from pymongo import MongoClient
 import json
 import calendar # calendar libraray is used for quick conversion from int (returned by weekday()) to weekday str.
 import distutils.util
+from PIL import Image, ImageDraw, ImageFont
 
 class Levelcog(commands.Cog):   
 
@@ -30,7 +31,6 @@ class Levelcog(commands.Cog):
         self.deafened_get_xp = json_dict['deafened_xp']
         self.valid_days = ['sunday', 'monday', 'tuesday', 'wednesday', 'thursday', 'friday', 'saturday']
         self.connect_to_db()
-        asyncio.create_task(self.give_voice_xp(60))
 
     def connect_to_db(self):
         try:
@@ -82,17 +82,22 @@ class Levelcog(commands.Cog):
                     'bonus_xp' : 0,
                     'total_xp' : 0,
                     'voice_xp' : 0, 
+                    'time_spent_in_vc' : 0, # Note: time_spent_in_vc is in minutes
                     'background' : None 
         })
         return True # Could register user into the db    
     
     def update_user_in_db(self, user): # Updates the level field of a user, in the db, accordingly with the users total xp. Called whenever the normal_xp or bonus_xp of a user is changed.
         cloned_dict = dict(self.collection.find_one({'_id' : user.id}))
-        self.collection.update_one({'_id' : user.id}, {'$set' : {'total_xp' : cloned_dict['normal_xp'] + cloned_dict['bonus_xp']}}) # Updates the users total_xp field, within the db, which is calculated by adding normal_xp and bonus_xp.
+        self.collection.update_one({'_id' : user.id}, {'$set' : {'total_xp' : cloned_dict['normal_xp'] + cloned_dict['bonus_xp'] + cloned_dict['voice_xp']}}) # Updates the users total_xp field, within the db, which is calculated by adding normal_xp and bonus_xp.
         cloned_dict = dict(self.collection.find_one({'_id' : user.id})) # Refreshing the the dict to have the newly updated xp value
         self.collection.update_one({'_id' : user.id}, {'$set' : {'level' : self.determine_level(cloned_dict['total_xp'])}}) # Then it updates the users level field, in the db, accordingly with the users total_xp.
 
+    def check_perms(self, user : discord.Member): # Takes in a user and checks and returns whether they have server admin perms
+        return user.guild_permissions.administrator # Used for all admin-level commands.
+
     async def give_voice_xp(self, delay): # Voice xp is given per minute, so this function is called every minute to check every single voice channel in the server and give users voice xp accordingly.
+        await asyncio.sleep(delay)
         if self.connected:
             for channel in self.bot.guilds[0].voice_channels: # We can just use bot.guilds[0] because the bot is only in 1 server.
                 json_dict = json.load(open('data.json', 'r'))
@@ -103,11 +108,14 @@ class Levelcog(commands.Cog):
                 if len(non_bot_members) > 0 and channel.id not in json_dict['blacklisted']['channels'] and channel.category.id not in json_dict['blacklisted']['channels']:
                     for member in non_bot_members:
                         if not self.muted_get_xp and member.voice.self_mute: continue # We skip/don't give the current member xp if they're muted and muted members currently shouldn't get xp.
-                        if not self.deafened_get_xp and member.voice.self_deafened: continue # We skip/don't give the current member xp if they're deafened and deafened members currently shouldn't get xp.
-                        if not member.bot and not member.voice.self_deaf and self.collection.find_one({'_id' : member.id}) != None:
-                            self.collection.update_one({'_id' : member.id}, {'$inc' : {'voice_xp' : self.voice_xp_rate}})
-            time.sleep(delay)
-            asyncio.create_task(self.give_voice_xp(60)) # Check and give voice xp again in 1 minute/60 seconds.
+                        if not self.deafened_get_xp and member.voice.self_deaf: continue # We skip/don't give the current member xp if they're deafened and deafened members currently shouldn't get xp.
+                        if not member.bot and self.collection.find_one({'_id' : member.id}) != None:
+                            self.collection.update_one({'_id' : member.id}, {'$inc' : {'voice_xp' : self.voice_xp_rate, 'time_spent_in_vc' : 1}})
+                            self.update_user_in_db(member)
+            self.bot.loop.create_task((self.give_voice_xp(60))) # Check and give voice xp again in 1 minute/60 seconds.
+
+    @commands.Cog.listener()
+    async def on_ready(self): self.bot.loop.create_task((self.give_voice_xp(60)))
 
     @commands.Cog.listener()
     async def on_message(self, message : discord.Message):
@@ -127,9 +135,12 @@ class Levelcog(commands.Cog):
             elif entry == None: self.register_user(author)
             with open('data.json', 'w') as file:
                 json.dump(json_dict, file, indent=4)
-   
+    
+
+
     @commands.command()
     async def status(self, ctx, *args): # Returns embed containing the bot's status, like its connection to the database, latency etc.
+        if not self.check_perms(ctx.author): return
         embed = discord.Embed(title='Bot Status')
         embed.set_footer(text=str(datetime.datetime.now().strftime("%d/%m/%Y %H:%M:%S")))
         embed.add_field(name='Connection to database', value=self.connected, inline=True)
@@ -139,6 +150,7 @@ class Levelcog(commands.Cog):
 
     @commands.command()
     async def initialise(self, ctx, *args):
+        if not self.check_perms(ctx.author): return
         embed : discord.Embed = discord.Embed(title="Members added to the database", description='') # Embed that stores all the members added to the database.
         for m in self.bot.guilds[0].members: # Bot is only in 1 server/guild thats why we can use self.bot.guilds[0]
             if self.collection.find_one({'_id' : m.id}) == None: # If the member could not be found in the db, then find_one() returns NoneType, so that's how we know the member doesn't exist in the db.
@@ -151,7 +163,8 @@ class Levelcog(commands.Cog):
         await ctx.send(embed=embed)
     
     @commands.command()
-    async def add_level(self, ctx, user : discord.Member,  level_arg : int) :
+    async def add_level(self, ctx, user : discord.Member,  level_arg : int):
+        if not self.check_perms(ctx.author): return
         try:
             level = int(level_arg)
             if level >= 1 and self.connected: # If connection to database is alive and level being added is more than 0
@@ -169,6 +182,7 @@ class Levelcog(commands.Cog):
 
     @commands.command()
     async def subtract_level(self, ctx, user : discord.Member, level_arg : int):
+        if not self.check_perms(ctx.author): return
         try:
             level = int(level_arg)
             if level >= 1 and self.connected:
@@ -187,6 +201,7 @@ class Levelcog(commands.Cog):
 
     @commands.command()
     async def set_level(self, ctx, user : discord.Member, level_arg : int, *args):
+        if not self.check_perms(ctx.author): return
         try:
             level = int(level_arg)
             if level >= 1 and self.connected:
@@ -203,6 +218,7 @@ class Levelcog(commands.Cog):
 
     @commands.command()
     async def reset_level(self, ctx, user : discord.Member, *args):
+        if not self.check_perms(ctx.author): return
         try:
             if self.connected:
                 self.collection.update_one({'_id' : user.id}, {'$set' : {'level' : 1, 'normal_xp' : 0, 'bonus_xp' : 0, 'total_xp' : 0}})
@@ -214,6 +230,7 @@ class Levelcog(commands.Cog):
 
     @commands.command()
     async def add_xp(self, ctx, user : discord.Member, xp_arg : int, *args):
+        if not self.check_perms(ctx.author): return
         try:
             xp = int(xp_arg)
             if xp >= 1 and self.connected:
@@ -227,6 +244,7 @@ class Levelcog(commands.Cog):
             
     @commands.command()
     async def subtract_xp(self, ctx, user : discord.Member, xp_arg : int, *args):
+        if not self.check_perms(ctx.author): return
         try:
             xp = int(xp_arg)
             if xp >= 1 and self.connected:
@@ -239,32 +257,8 @@ class Levelcog(commands.Cog):
             await ctx.send("Invalid amount of xp was passed in!")
 
     @commands.command()
-    async def leaderboard(self, ctx):
-        if self.connected:
-            leaderboard = list(self.collection.find({}).sort('total_xp', pymongo.DESCENDING).limit(10))
-            total_count = len(leaderboard)
-            embed_list = []
-            i = 0
-            while total_count >= 1: # Keep making pages as long as there are user entries left.
-                if total_count > 0 and total_count < 10:
-                    embed = discord.Embed(title='Leaderboard ' + "(Showing " + str(i + 1) + " - " + str(len(leaderboard)) + ")", description='')
-                    while i <= total_count - 1 and (i == 0 or i % 10 != 0):
-                        user_dict = self.collection.find_one({'_id' : leaderboard[i]['_id']})
-                        embed.description += str(i + 1) + '. ' + self.bot.get_user(leaderboard[i]['_id']).mention + '\n' +  str(user_dict['total_xp']) + " XP  :microphone2: " + str(user_dict['voice_xp']) + "  :trophy: " + str(user_dict['bonus_xp'])  
-                        i += 1
-                    embed_list.append(embed)
-                total_count -= 10
-            if len(embed_list) > 0:
-                for e in embed_list:
-                    e.set_footer(text = str(datetime.datetime.now().strftime("%d/%m/%Y %H:%M:%S")))
-                    e.set_thumbnail(url=ctx.guild.icon_url)
-                    msg_send : discord.Message = await ctx.send(embed=e)
-                    #await msg_send.add_reaction(":▶:")
-                    #await msg_send.add_reaction(":arrow_left:")
-                    #await msg_send.add_reaction(":x:")
-
-    @commands.command()
     async def set_bonus_xp_days(self, ctx, *args):
+        if not self.check_perms(ctx.author): return
         for arg in args:
             if self.connected and arg.lower() in self.valid_days: 
                 arg_lower = arg.lower()
@@ -281,6 +275,7 @@ class Levelcog(commands.Cog):
     
     @commands.command()
     async def unset_bonus_xp_days(self, ctx, *args):
+        if not self.check_perms(ctx.author): return
         for arg in args:
             if self.connected and arg.lower() in self.valid_days:
                 arg_lower = arg.lower()
@@ -297,6 +292,7 @@ class Levelcog(commands.Cog):
         
     @commands.command()
     async def set_xp_per_message(self, ctx, xp, *args):
+        if not self.check_perms(ctx.author): return
         try:
             xp = int(xp) # Trying to convert the xp arg to a number
             if xp < 0: raise ValueError # We can't have negative xp for a number
@@ -314,6 +310,7 @@ class Levelcog(commands.Cog):
 
     @commands.command()
     async def set_bonus_xp_rate(self, ctx, rate, *args):
+        if not self.check_perms(ctx.author): return
         try:
             rate = int(rate)
             if rate < 0: raise ValueError # Rates below 0 are invalid.
@@ -330,6 +327,7 @@ class Levelcog(commands.Cog):
 
     @commands.command()
     async def set_voice_xp_rate(self, ctx, rate, *args):
+        if not self.check_perms(ctx.author): return
         try:
             rate = int(rate)
             if rate < 0: raise ValueError
@@ -345,39 +343,46 @@ class Levelcog(commands.Cog):
 
     @commands.command()
     async def set_solo_xp(self, ctx, solo, *args): # Whether users, that are alone in vc, should gain xp.
+        if not self.check_perms(ctx.author): return
         try:
             solo = bool(distutils.util.strtobool(solo))
             json_dict = json.load(open('data.json', 'r'))
             json_dict['solo_xp'] = solo
             with open('data.json', 'w') as file:
                 json.dump(json_dict, file, indent=4)
+            self.solo_get_xp = solo
         except(ValueError):
             await ctx.send("The value you passed in was invalid! Please pass in true or false only. (Example: .set_solo_xp true)")
 
     @commands.command()
     async def set_muted_xp(self, ctx, muted, *args): # Whether users, that are muted in vc, should gain xp.
+        if not self.check_perms(ctx.author): return
         try:
             muted = bool(distutils.util.strtobool(muted))
             json_dict = json.load(open('data.json', 'r'))
             json_dict['muted_xp'] = muted
             with open('data.json', 'w') as file:
                 json.dump(json_dict, file, indent=4)
+            self.muted_get_xp = muted
         except(ValueError):
             await ctx.send("The value you passed in was invalid! Please pass in true or false only. (Example: .set_muted_xp false)")
 
     @commands.command()
     async def set_deafened_xp(self, ctx, deaf, *args): # Whether users, that are deafened in vc, should gain xp.
+        if not self.check_perms(ctx.author): return
         try:
             deaf = bool(distutils.util.strtobool(deaf))
             json_dict = json.load(open('data.json', 'r'))
             json_dict['deaf_xp'] = deaf
             with open('data.json', 'w') as file:
                 json.dump(json_dict, file, indent=4)
+            self.deaf_get_xp = deaf
         except(ValueError):
             await ctx.send("The value you passed in was invalid! Please pass in true or false only. (Example: .set_deaf_xp true)")
 
     @commands.command()
     async def blacklist_channel(self, ctx, channel, *args):
+        if not self.check_perms(ctx.author): return
         try:
             channel = self.bot.get_channel(int(channel.replace('<', '').replace('>', '').replace('#', '')))
         except(Exception): # if there was an error while trying to get the channel
@@ -395,6 +400,7 @@ class Levelcog(commands.Cog):
 
     @commands.command()
     async def unblacklist_channel(self, ctx, channel, *args):
+        if not self.check_perms(ctx.author): return
         try:
             channel = self.bot.get_channel(int(channel.replace('<', '').replace('>', '').replace('#', '')))
         except(Exception): # if there was an error while trying to get the channel
@@ -412,6 +418,7 @@ class Levelcog(commands.Cog):
 
     @commands.command()
     async def blacklist_category(self, ctx, *args):
+        if not self.check_perms(ctx.author): return
         try:
             category_id = int(args[0]) # Trying to convert arg into int by default, presuming its an int for ID
             category = get(ctx.guild.categories, id=category_id)
@@ -435,6 +442,7 @@ class Levelcog(commands.Cog):
 
     @commands.command()
     async def unblacklist_category(self, ctx, *args):
+        if not self.check_perms(ctx.author): return
         try:
             category_id = int(args[0]) # Trying to convert arg into int by default, presuming its an int for ID
             category = get(ctx.guild.categories, id=category_id)
@@ -455,6 +463,178 @@ class Levelcog(commands.Cog):
             with open('data.json', 'w') as file:
                 json.dump(temp_dict, file, indent=4)
             await ctx.send(category.mention + ' is no longer blacklisted. Messages sent in it will now gain xp for their sender!')
+    
+    @commands.command()
+    async def leaderboard(self, ctx):
+        if self.connected:
+            leaderboard = list(self.collection.find({}).sort('total_xp', pymongo.DESCENDING).limit(10))
+            total_count = len(leaderboard)
+            embed_list = []
+            i = 0
+            while total_count >= 1: # Keep making pages as long as there are user entries left.
+                if total_count > 0 and total_count <= 10:
+                    embed = discord.Embed(title='Leaderboard ' + "(Showing " + str(i + 1) + " - " + str(len(leaderboard)) + ")", description='')
+                    while i <= total_count - 1 and (i == 0 or i % 10 != 0):
+                        user_dict = self.collection.find_one({'_id' : leaderboard[i]['_id']})
+                        embed.description += str(i + 1) + '. ' + self.bot.get_user(leaderboard[i]['_id']).name + ' :military_medal: ' + str(user_dict['level']) + '\n' + str(user_dict['total_xp']) + " XP  :microphone2: " + str(round(user_dict['time_spent_in_vc']/60, 1)) + "  :trophy: " + str(user_dict['bonus_xp'])  + '\n'
+                        i += 1
+                    embed_list.append(embed)
+                total_count -= 10
+            
+            if len(embed_list) > 0:
+                for e in embed_list:
+                    e.set_footer(text = str(datetime.datetime.now().strftime("%d/%m/%Y %H:%M:%S")))
+                    e.set_thumbnail(url=ctx.guild.icon_url)
+                    msg_send : discord.Message = await ctx.send(embed=e)
+                    #await msg_send.add_reaction(":▶:")
+                    #await msg_send.add_reaction(":arrow_left:")
+                    #await msg_send.add_reaction(":x:")
+
+    @commands.command()
+    async def rank(self, ctx):
+        author = ctx.author
+        rankings = self.collection.find({}).sort("points", pymongo.DESCENDING)
+        num = 1
+        member_dict = self.collection.find_one({"id" : author.id})
+        level = member_dict["level"]
+        rank = 0
+        for dictionary in rankings: # For loop to get the rank of the member.
+            if(dictionary["id"] == author.id):
+                rank = num
+            num += 1
+        background_colour1 = (51, 57, 61, 255) # #33393d
+        background_colour2 = (8, 11, 12, 255)
+        background1 = Image.new("RGBA", (1400, 450), color=background_colour1)
+        background2 = Image.new("RGBA", (1200, 300), color=background_colour2)
+        await author.avatar_url_as(format="png").save(fp="avatar.png")
+        logo = Image.open("avatar.png").resize((213, 213))
+        bigsize = (logo.size[0] * 3, logo.size[1] * 3)
+        mask = Image.new("L", bigsize, 0)
+        discriminator = "#" + author.discriminator
+        username = author.name
+        xp = member_dict["points"] - self.determine_xp(level)
+        finalpoints = self.determine_points(level + 1) - self.determine_points(level)
+        theme_colour = "#ff4d00ff" # #ff4d00ff is orangish
+        font = "OpenSans-Regular.ttf"
+        boundary_fill_colour = (0, 0, 255, 0)
+
+        draw = ImageDraw.Draw(mask)
+        draw.ellipse((0, 0) + bigsize, 255)
+
+
+        # Putting a circle over the profile picture to make the profile picture a circle.
+        mask = mask.resize(logo.size, Image.ANTIALIAS)
+        logo.putalpha(mask)
+
+        background2.paste(logo, (50, 49), mask=logo)
+
+        draw = ImageDraw.Draw(background2, "RGBA")
+
+
+        # Initializing fonts (font stored in local directory)
+        big_font = ImageFont.FreeTypeFont(font, 100)
+        medium_font = ImageFont.FreeTypeFont(font, 31)
+        small_font = ImageFont.FreeTypeFont(font, 30)
+
         
+
+        # Empty Progress Bar (Gray)
+        bar_offset_x = 300
+        bar_offset_y = 220
+        bar_offset_x_1 = bar_offset_x + 830
+        bar_offset_y_1 = bar_offset_y + 55
+        circle_size = bar_offset_y_1 - bar_offset_y  # Diameter
+
+        # Rectangle to cover most of the bar (and then circles are added to each side of the bar to make it look like a round bar).
+        draw.rectangle((bar_offset_x, bar_offset_y, bar_offset_x_1, bar_offset_y_1), fill="#727175")
+
+        # Left Circle
+        draw.ellipse((bar_offset_x - circle_size // 2, bar_offset_y, bar_offset_x + circle_size // 2, bar_offset_y_1), fill="#727175")
+
+        # Right Circle
+        draw.ellipse((bar_offset_x_1 - circle_size // 2, bar_offset_y, bar_offset_x_1 + circle_size // 2, bar_offset_y_1), fill="#727175")
+
+        # Making edges round
+        # Top right
+        dot = "#080b0c"
+        draw.ellipse((1200 - circle_size // 2, -20, 1200 + circle_size // 2, 20), fill=boundary_fill_colour)
+        draw.ellipse((1180 - circle_size // 2, 0, 1180 + circle_size // 2, 40), fill=dot)
+
+        # Bottom right
+        draw.ellipse((1200 - circle_size // 2, 280, 1200 + circle_size // 2, 320), fill=boundary_fill_colour)
+        draw.ellipse((1180 - circle_size // 2, 260, 1180 + circle_size // 2, 300), fill=dot)
+
+        # Bottom left
+        draw.ellipse((0 - circle_size // 2, 280, 0 + circle_size // 2, 320), fill=boundary_fill_colour)
+        draw.ellipse((20 - circle_size // 2, 260, 20 + circle_size // 2, 300), fill=dot)
+
+        # Top left
+        draw.ellipse((0 - circle_size // 2, -20, 0 + circle_size // 2, 20), fill=boundary_fill_colour)
+        draw.ellipse((20 - circle_size // 2, 0, 20 + circle_size // 2, 40), fill=dot)
+
+
+        # Level and rank characters
+        text_size = draw.textsize(str(level), font=big_font)
+        offset_x = 1200 - 55 - text_size[0]
+        offset_y = 10
+        draw.text((offset_x, offset_y - 15), str(level), font=big_font, fill=theme_colour)
+
+        text_size = draw.textsize("LEVEL", font=small_font)
+        offset_x -= text_size[0] + 5
+        draw.text((offset_x, offset_y + 60), "LEVEL", font=small_font, fill=theme_colour)
+
+        text_size = draw.textsize(f"#{rank}", font=big_font)
+        offset_x -= text_size[0] + 15
+        draw.text((offset_x, offset_y - 15), f"#{rank}", font=big_font, fill="#fff")
+
+        text_size = draw.textsize("RANK", font=small_font)
+        offset_x -= text_size[0] + 5
+        draw.text((offset_x, offset_y + 60), "RANK", font=small_font, fill="#fff")
+
+        # Filling Bar
+        bar_length = bar_offset_x_1 - bar_offset_x
+        progress = (finalpoints - points) * 100 / finalpoints
+        progress = 100 - progress
+        progress_bar_length = round(bar_length * progress / 100)
+        bar_offset_x_1 = bar_offset_x + progress_bar_length
+
+
+        # Progress Bar (coloured, we make a rectangle first that covers most of the area that is supposed to be highlighted. Then add circles to each end.)
+        draw.rectangle((bar_offset_x, bar_offset_y, bar_offset_x_1, bar_offset_y_1), fill=theme_colour)
+
+        # Left Circle of the progress bar (coloured)
+        draw.ellipse((bar_offset_x - circle_size // 2, bar_offset_y, bar_offset_x + circle_size // 2, bar_offset_y_1), fill=theme_colour)
+
+        # Right Circle of the progress bar (coloured)
+        draw.ellipse((bar_offset_x_1 - circle_size // 2, bar_offset_y, bar_offset_x_1 + circle_size // 2, bar_offset_y_1), fill=theme_colour)
+
+        # XP counter
+        text_size = draw.textsize(f"/ {finalpoints} XP", font=small_font)
+
+        offset_x = 1150 - text_size[0]
+        offset_y = bar_offset_y - text_size[1] - 28
+
+        # Points marker 
+        draw.text((offset_x, offset_y), f"/ {finalpoints:,} XP", font=small_font, fill="#727175")
+
+        text_size = draw.textsize(f"{points:,}", font=small_font)
+        offset_x -= text_size[0] + 8
+        draw.text((offset_x, offset_y), f"{points:,}", font=small_font, fill="#fff")
+
+
+        # User name
+        text_size = draw.textsize(username, font=medium_font)
+        offset_x = bar_offset_x
+        offset_y = bar_offset_y - 60
+        draw.text((offset_x, offset_y), username, font=medium_font, fill="#fff")
+
+        # Users discriminator
+        offset_x += text_size[0] + 5
+
+        draw.text((offset_x, offset_y), discriminator, font=medium_font, fill="#fff")
+        background1.paste(background2, (100, 75), mask=background2)
+        background1.save("rankcard1.png")
+        await ctx.send(file = discord.File("rankcard1.png"))
+
 def setup(client):
     client.add_cog(Levelcog(client)) 
