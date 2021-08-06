@@ -1,5 +1,6 @@
 import asyncio
-import time
+import urllib.request
+import requests # Used to validate urls (that are sent in by users through commands)
 import discord
 from discord import user
 from discord.ext import commands
@@ -74,24 +75,28 @@ class Levelcog(commands.Cog):
         if not self.connected: # If a connection to database hasn't been established 
             if not self.connect_to_db(): # Trying to make connection here. If we can't then we return false and exit the function
                 return False    
-        self.collection.insert_one({
-                    'name' : user.name,
-                    '_id' : user.id, # _id (which is the primary key/identifier/unique field among all member entries in the database) is the discord user's id.
-                    'level' : 1,
-                    'normal_xp' : 0,
-                    'bonus_xp' : 0,
-                    'total_xp' : 0,
-                    'voice_xp' : 0, 
-                    'time_spent_in_vc' : 0, # Note: time_spent_in_vc is in minutes
-                    'background' : None 
-        })
-        return True # Could register user into the db    
-    
+        try:    
+            self.collection.insert_one({
+                        'name' : user.name,
+                        '_id' : user.id, # _id (which is the primary key/identifier/unique field among all member entries in the database) is the discord user's id.
+                        'level' : 1,
+                        'normal_xp' : 0,
+                        'bonus_xp' : 0,
+                        'total_xp' : 0,
+                        'voice_xp' : 0, 
+                        'time_spent_in_vc' : 0, # Note: time_spent_in_vc is in minutes
+                        'background' : None 
+            })
+            return True # Could register user into the db    
+        except(Exception): return False # Exception occurred and so we can't add the user.
     def update_user_in_db(self, user): # Updates the level field of a user, in the db, accordingly with the users total xp. Called whenever the normal_xp or bonus_xp of a user is changed.
-        cloned_dict = dict(self.collection.find_one({'_id' : user.id}))
-        self.collection.update_one({'_id' : user.id}, {'$set' : {'total_xp' : cloned_dict['normal_xp'] + cloned_dict['bonus_xp'] + cloned_dict['voice_xp']}}) # Updates the users total_xp field, within the db, which is calculated by adding normal_xp and bonus_xp.
-        cloned_dict = dict(self.collection.find_one({'_id' : user.id})) # Refreshing the the dict to have the newly updated xp value
-        self.collection.update_one({'_id' : user.id}, {'$set' : {'level' : self.determine_level(cloned_dict['total_xp'])}}) # Then it updates the users level field, in the db, accordingly with the users total_xp.
+        try:
+            cloned_dict = dict(self.collection.find_one({'_id' : user.id}))
+            self.collection.update_one({'_id' : user.id}, {'$set' : {'total_xp' : cloned_dict['normal_xp'] + cloned_dict['bonus_xp'] + cloned_dict['voice_xp']}}) # Updates the users total_xp field, within the db, which is calculated by adding normal_xp and bonus_xp.
+            cloned_dict = dict(self.collection.find_one({'_id' : user.id})) # Refreshing the the dict to have the newly updated xp value
+            self.collection.update_one({'_id' : user.id}, {'$set' : {'level' : self.determine_level(cloned_dict['total_xp'])}}) # Then it updates the users level field, in the db, accordingly with the users total_xp.
+        except(Exception):
+            self.register_user(user) # Registers user if they weren't in DB.
 
     def check_perms(self, user : discord.Member): # Takes in a user and checks and returns whether they have server admin perms
         return user.guild_permissions.administrator # Used for all admin-level commands.
@@ -490,30 +495,58 @@ class Levelcog(commands.Cog):
                     #await msg_send.add_reaction(":arrow_left:")
                     #await msg_send.add_reaction(":x:")
 
+    @commands.command(name='set_background')
+    async def set_background(self, ctx, *args):
+        user = ctx.author
+        self.update_user_in_db(user) # Checks and registers user in db incase they aren't added
+        attachments = ctx.message.attachments
+        if len(attachments) == 0: 
+            await ctx.send("You need to send your custom background as an attachment to the command message!")
+            return
+        url = attachments[0].url
+        if self.connected:
+            self.collection.update_one({'_id' : user.id}, {'$set' : {'background' : url}})
+            await ctx.send("Updated " + user.mention + "'s background.")
+
     @commands.command()
     async def rank(self, ctx):
         author = ctx.author
         rankings = self.collection.find({}).sort("points", pymongo.DESCENDING)
         num = 1
-        member_dict = self.collection.find_one({"id" : author.id})
-        level = member_dict["level"]
+        member_dict = dict(self.collection.find_one({"_id" : author.id}))
+        level = member_dict['level']
         rank = 0
         for dictionary in rankings: # For loop to get the rank of the member.
-            if(dictionary["id"] == author.id):
+            if(dictionary["_id"] == author.id):
                 rank = num
             num += 1
-        background_colour1 = (51, 57, 61, 255) # #33393d
-        background_colour2 = (8, 11, 12, 255)
-        background1 = Image.new("RGBA", (1400, 450), color=background_colour1)
-        background2 = Image.new("RGBA", (1200, 300), color=background_colour2)
+        entry = self.collection.find_one({'_id' : author.id})
+
+        if not entry['background'] is None: # If their background is not null in the database. 
+            
+            user_agent = 'Mozilla/5.0 (Windows; U; Windows NT 5.1; en-US; rv:1.9.0.7) Gecko/2009021910 Firefox/3.0.7' # Creating a fake user agent so that we gain access to the url adn download the background temporarily.
+            url = "https://cdn.discordapp.com/attachments/868919518934732820/873337647295250453/VALO_ACE.png"
+            headers = {'User-Agent' : user_agent} 
+            request = urllib.request.Request(url, None, headers) 
+            response = urllib.request.urlopen(request)
+            data = response.read() 
+            file_extension = entry['background'][-5:].split('.')[1]
+            f = open('current.' + file_extension, 'wb')
+            f.write(data)
+            f.close()
+            background = Image.open('current.' + file_extension)
+            background = background.resize((1200, 300))
+        else: 
+            background_colour = (8, 11, 12, 255) 
+            background = Image.new("RGBA", (1200, 300), color=background_colour)
         await author.avatar_url_as(format="png").save(fp="avatar.png")
         logo = Image.open("avatar.png").resize((213, 213))
         bigsize = (logo.size[0] * 3, logo.size[1] * 3)
         mask = Image.new("L", bigsize, 0)
         discriminator = "#" + author.discriminator
         username = author.name
-        xp = member_dict["points"] - self.determine_xp(level)
-        finalpoints = self.determine_points(level + 1) - self.determine_points(level)
+        xp = member_dict["total_xp"] - self.determine_xp(level)
+        finalpoints = self.determine_xp(level + 1) - self.determine_xp(level)
         theme_colour = "#ff4d00ff" # #ff4d00ff is orangish
         font = "OpenSans-Regular.ttf"
         boundary_fill_colour = (0, 0, 255, 0)
@@ -526,9 +559,9 @@ class Levelcog(commands.Cog):
         mask = mask.resize(logo.size, Image.ANTIALIAS)
         logo.putalpha(mask)
 
-        background2.paste(logo, (50, 49), mask=logo)
+        background.paste(logo, (50, 49), mask=logo)
 
-        draw = ImageDraw.Draw(background2, "RGBA")
+        draw = ImageDraw.Draw(background, "RGBA")
 
 
         # Initializing fonts (font stored in local directory)
@@ -554,23 +587,23 @@ class Levelcog(commands.Cog):
         # Right Circle
         draw.ellipse((bar_offset_x_1 - circle_size // 2, bar_offset_y, bar_offset_x_1 + circle_size // 2, bar_offset_y_1), fill="#727175")
 
-        # Making edges round
-        # Top right
-        dot = "#080b0c"
-        draw.ellipse((1200 - circle_size // 2, -20, 1200 + circle_size // 2, 20), fill=boundary_fill_colour)
-        draw.ellipse((1180 - circle_size // 2, 0, 1180 + circle_size // 2, 40), fill=dot)
+        ## Making edges round
+        ## Top right
+        #dot = "#080b0c"
+        #draw.ellipse((1200 - circle_size // 2, -20, 1200 + circle_size // 2, 20), fill=boundary_fill_colour)
+        #draw.ellipse((1180 - circle_size // 2, 0, 1180 + circle_size // 2, 40), fill=dot)
 
-        # Bottom right
-        draw.ellipse((1200 - circle_size // 2, 280, 1200 + circle_size // 2, 320), fill=boundary_fill_colour)
-        draw.ellipse((1180 - circle_size // 2, 260, 1180 + circle_size // 2, 300), fill=dot)
+        ## Bottom right
+        #draw.ellipse((1200 - circle_size // 2, 280, 1200 + circle_size // 2, 320), fill=boundary_fill_colour)
+        #draw.ellipse((1180 - circle_size // 2, 260, 1180 + circle_size // 2, 300), fill=dot)
 
-        # Bottom left
-        draw.ellipse((0 - circle_size // 2, 280, 0 + circle_size // 2, 320), fill=boundary_fill_colour)
-        draw.ellipse((20 - circle_size // 2, 260, 20 + circle_size // 2, 300), fill=dot)
+        ## Bottom left
+        #draw.ellipse((0 - circle_size // 2, 280, 0 + circle_size // 2, 320), fill=boundary_fill_colour)
+        #draw.ellipse((20 - circle_size // 2, 260, 20 + circle_size // 2, 300), fill=dot)
 
-        # Top left
-        draw.ellipse((0 - circle_size // 2, -20, 0 + circle_size // 2, 20), fill=boundary_fill_colour)
-        draw.ellipse((20 - circle_size // 2, 0, 20 + circle_size // 2, 40), fill=dot)
+        ## Top left
+        #draw.ellipse((0 - circle_size // 2, -20, 0 + circle_size // 2, 20), fill=boundary_fill_colour)
+        #draw.ellipse((20 - circle_size // 2, 0, 20 + circle_size // 2, 40), fill=dot)
 
 
         # Level and rank characters
@@ -593,7 +626,7 @@ class Levelcog(commands.Cog):
 
         # Filling Bar
         bar_length = bar_offset_x_1 - bar_offset_x
-        progress = (finalpoints - points) * 100 / finalpoints
+        progress = (finalpoints - xp) * 100 / finalpoints
         progress = 100 - progress
         progress_bar_length = round(bar_length * progress / 100)
         bar_offset_x_1 = bar_offset_x + progress_bar_length
@@ -617,9 +650,9 @@ class Levelcog(commands.Cog):
         # Points marker 
         draw.text((offset_x, offset_y), f"/ {finalpoints:,} XP", font=small_font, fill="#727175")
 
-        text_size = draw.textsize(f"{points:,}", font=small_font)
+        text_size = draw.textsize(f"{xp:,}", font=small_font)
         offset_x -= text_size[0] + 8
-        draw.text((offset_x, offset_y), f"{points:,}", font=small_font, fill="#fff")
+        draw.text((offset_x, offset_y), f"{xp:,}", font=small_font, fill="#fff")
 
 
         # User name
@@ -632,8 +665,7 @@ class Levelcog(commands.Cog):
         offset_x += text_size[0] + 5
 
         draw.text((offset_x, offset_y), discriminator, font=medium_font, fill="#fff")
-        background1.paste(background2, (100, 75), mask=background2)
-        background1.save("rankcard1.png")
+        background.save("rankcard1.png")
         await ctx.send(file = discord.File("rankcard1.png"))
 
 def setup(client):
