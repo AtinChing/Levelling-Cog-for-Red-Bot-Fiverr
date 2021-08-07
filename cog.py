@@ -508,6 +508,14 @@ class Levelcog(commands.Cog):
             self.collection.update_one({'_id' : user.id}, {'$set' : {'background' : url}})
             await ctx.send("Updated " + user.mention + "'s background.")
 
+    @commands.command(name='reset_background')
+    async def reset_background(self, ctx, *args):
+        user = ctx.author
+        self.update_user_in_db(user)
+        if self.connected:
+            self.collection.update_one({'_id' : user.id}, {'$set' : {'background' : None}})
+            await ctx.send(user.mention + "'s background has been reset.")
+
     @commands.command()
     async def rank(self, ctx):
         author = ctx.author
@@ -540,7 +548,8 @@ class Levelcog(commands.Cog):
             background_colour = (8, 11, 12, 255) 
             background = Image.new("RGBA", (1200, 300), color=background_colour)
         await author.avatar_url_as(format="png").save(fp="avatar.png")
-        logo = Image.open("avatar.png").resize((213, 213))
+        logo = Image.open("avatar.png").resize((270, 270))
+        white_circle = Image.new("RGB", (300, 300), (17, 17, 17))
         bigsize = (logo.size[0] * 3, logo.size[1] * 3)
         mask = Image.new("L", bigsize, 0)
         discriminator = "#" + author.discriminator
@@ -555,13 +564,7 @@ class Levelcog(commands.Cog):
         draw.ellipse((0, 0) + bigsize, 255)
 
 
-        # Putting a circle over the profile picture to make the profile picture a circle.
-        mask = mask.resize(logo.size, Image.ANTIALIAS)
-        logo.putalpha(mask)
-
-        background.paste(logo, (50, 49), mask=logo)
-
-        draw = ImageDraw.Draw(background, "RGBA")
+        
 
 
         # Initializing fonts (font stored in local directory)
@@ -569,23 +572,32 @@ class Levelcog(commands.Cog):
         medium_font = ImageFont.FreeTypeFont(font, 31)
         small_font = ImageFont.FreeTypeFont(font, 30)
 
+
+        # Putting a circle over the profile picture to make the profile picture a circle.
+
+        mask = mask.resize(logo.size, Image.ANTIALIAS)
+        logo.putalpha(mask)
+        #logo.putalpha(110)
+        mask2 = mask.resize(white_circle.size, Image.ANTIALIAS)
+        white_circle.putalpha(mask2)
+
+        draw = ImageDraw.Draw(background, "RGBA")
         
 
         # Empty Progress Bar (Gray)
-        bar_offset_x = 300
-        bar_offset_y = 220
-        bar_offset_x_1 = bar_offset_x + 830
-        bar_offset_y_1 = bar_offset_y + 55
-        circle_size = bar_offset_y_1 - bar_offset_y  # Diameter
+        bar_offset_x = 292
+        bar_offset_y = 100
+        bar_offset_x_1 = 1200
+        bar_offset_y_1 = bar_offset_y + 30
+        #circle_size = bar_offset_y_1 - bar_offset_y  # Diameter
 
         # Rectangle to cover most of the bar (and then circles are added to each side of the bar to make it look like a round bar).
         draw.rectangle((bar_offset_x, bar_offset_y, bar_offset_x_1, bar_offset_y_1), fill="#727175")
-
-        # Left Circle
-        draw.ellipse((bar_offset_x - circle_size // 2, bar_offset_y, bar_offset_x + circle_size // 2, bar_offset_y_1), fill="#727175")
-
-        # Right Circle
-        draw.ellipse((bar_offset_x_1 - circle_size // 2, bar_offset_y, bar_offset_x_1 + circle_size // 2, bar_offset_y_1), fill="#727175")
+        
+        ## Left Circle
+        #draw.ellipse((bar_offset_x - circle_size // 2, bar_offset_y, bar_offset_x + circle_size // 2, bar_offset_y_1), fill="#727175")
+        ## Right Circle
+        #draw.ellipse((bar_offset_x_1 - circle_size // 2, bar_offset_y, bar_offset_x_1 + circle_size // 2, bar_offset_y_1), fill="#727175")
 
         ## Making edges round
         ## Top right
@@ -608,20 +620,20 @@ class Levelcog(commands.Cog):
 
         # Level and rank characters
         text_size = draw.textsize(str(level), font=big_font)
-        offset_x = 1200 - 55 - text_size[0]
-        offset_y = 10
-        draw.text((offset_x, offset_y - 15), str(level), font=big_font, fill=theme_colour)
+        offset_x = 850 - 55 - text_size[0]
+        offset_y = 180
+        draw.text((offset_x + 15, offset_y - 50), str(level), font=big_font, fill=theme_colour)
 
         text_size = draw.textsize("LEVEL", font=small_font)
-        offset_x -= text_size[0] + 5
+        #offset_x -= text_size[0] + 5
         draw.text((offset_x, offset_y + 60), "LEVEL", font=small_font, fill=theme_colour)
 
         text_size = draw.textsize(f"#{rank}", font=big_font)
-        offset_x -= text_size[0] + 15
-        draw.text((offset_x, offset_y - 15), f"#{rank}", font=big_font, fill="#fff")
+        offset_x -= text_size[0] + 60
+        draw.text((offset_x - 22, offset_y - 50), f"#{rank}", font=big_font, fill="#fff")
 
         text_size = draw.textsize("RANK", font=small_font)
-        offset_x -= text_size[0] + 5
+        #offset_x -= text_size[0] + 5
         draw.text((offset_x, offset_y + 60), "RANK", font=small_font, fill="#fff")
 
         # Filling Bar
@@ -632,23 +644,23 @@ class Levelcog(commands.Cog):
         bar_offset_x_1 = bar_offset_x + progress_bar_length
 
 
-        # Progress Bar (coloured, we make a rectangle first that covers most of the area that is supposed to be highlighted. Then add circles to each end.)
+        # Progress Bar (coloured, we make a rectangle first that covers most of the area that is supposed to be highlighted.)
         draw.rectangle((bar_offset_x, bar_offset_y, bar_offset_x_1, bar_offset_y_1), fill=theme_colour)
 
-        # Left Circle of the progress bar (coloured)
-        draw.ellipse((bar_offset_x - circle_size // 2, bar_offset_y, bar_offset_x + circle_size // 2, bar_offset_y_1), fill=theme_colour)
+        ## Left Circle of the progress bar (coloured)
+        #draw.ellipse((bar_offset_x - circle_size // 2, bar_offset_y, bar_offset_x + circle_size // 2, bar_offset_y_1), fill=theme_colour)
 
-        # Right Circle of the progress bar (coloured)
-        draw.ellipse((bar_offset_x_1 - circle_size // 2, bar_offset_y, bar_offset_x_1 + circle_size // 2, bar_offset_y_1), fill=theme_colour)
+        ## Right Circle of the progress bar (coloured)
+        #draw.ellipse((bar_offset_x_1 - circle_size // 2, bar_offset_y, bar_offset_x_1 + circle_size // 2, bar_offset_y_1), fill=theme_colour)
 
         # XP counter
         text_size = draw.textsize(f"/ {finalpoints} XP", font=small_font)
 
-        offset_x = 1150 - text_size[0]
-        offset_y = bar_offset_y - text_size[1] - 28
+        offset_x = 680
+        offset_y = bar_offset_y - 5
 
         # Points marker 
-        draw.text((offset_x, offset_y), f"/ {finalpoints:,} XP", font=small_font, fill="#727175")
+        draw.text((offset_x, offset_y), f"/ {finalpoints:,} XP", font=small_font, fill="#fff")
 
         text_size = draw.textsize(f"{xp:,}", font=small_font)
         offset_x -= text_size[0] + 8
@@ -657,14 +669,16 @@ class Levelcog(commands.Cog):
 
         # User name
         text_size = draw.textsize(username, font=medium_font)
-        offset_x = bar_offset_x
-        offset_y = bar_offset_y - 60
+        offset_x = bar_offset_x + 60
+        offset_y = bar_offset_y - 50
         draw.text((offset_x, offset_y), username, font=medium_font, fill="#fff")
 
         # Users discriminator
         offset_x += text_size[0] + 5
 
         draw.text((offset_x, offset_y), discriminator, font=medium_font, fill="#fff")
+        background.paste(white_circle, (0, 0), mask=white_circle)
+        background.paste(logo, (15, 15), mask=logo)
         background.save("rankcard1.png")
         await ctx.send(file = discord.File("rankcard1.png"))
 
