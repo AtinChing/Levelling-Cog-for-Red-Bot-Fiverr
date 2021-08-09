@@ -533,7 +533,7 @@ class Levelcog(commands.Cog):
         if not entry['background'] is None: # If their background is not null in the database. 
             
             user_agent = 'Mozilla/5.0 (Windows; U; Windows NT 5.1; en-US; rv:1.9.0.7) Gecko/2009021910 Firefox/3.0.7' # Creating a fake user agent so that we gain access to the url adn download the background temporarily.
-            url = "https://cdn.discordapp.com/attachments/868919518934732820/873337647295250453/VALO_ACE.png"
+            url = entry['background']
             headers = {'User-Agent' : user_agent} 
             request = urllib.request.Request(url, None, headers) 
             response = urllib.request.urlopen(request)
@@ -542,14 +542,13 @@ class Levelcog(commands.Cog):
             f = open('current.' + file_extension, 'wb')
             f.write(data)
             f.close()
-            background = Image.open('current.' + file_extension)
+            background = Image.open('current.' + file_extension).convert('RGBA')
             background = background.resize((1200, 300))
         else: 
             background_colour = (8, 11, 12, 255) 
             background = Image.new("RGBA", (1200, 300), color=background_colour)
         await author.avatar_url_as(format="png").save(fp="avatar.png")
-        logo = Image.open("avatar.png").resize((270, 270))
-        white_circle = Image.new("RGB", (300, 300), (17, 17, 17))
+        logo = Image.open("avatar.png").resize((300, 300))
         bigsize = (logo.size[0] * 3, logo.size[1] * 3)
         mask = Image.new("L", bigsize, 0)
         discriminator = "#" + author.discriminator
@@ -558,65 +557,46 @@ class Levelcog(commands.Cog):
         finalpoints = self.determine_xp(level + 1) - self.determine_xp(level)
         theme_colour = "#ff4d00ff" # #ff4d00ff is orangish
         font = "OpenSans-Regular.ttf"
-        boundary_fill_colour = (0, 0, 255, 0)
 
         draw = ImageDraw.Draw(mask)
         draw.ellipse((0, 0) + bigsize, 255)
-
-
-        
-
 
         # Initializing fonts (font stored in local directory)
         big_font = ImageFont.FreeTypeFont(font, 100)
         medium_font = ImageFont.FreeTypeFont(font, 31)
         small_font = ImageFont.FreeTypeFont(font, 30)
 
-
         # Putting a circle over the profile picture to make the profile picture a circle.
-
         mask = mask.resize(logo.size, Image.ANTIALIAS)
         logo.putalpha(mask)
-        #logo.putalpha(110)
-        mask2 = mask.resize(white_circle.size, Image.ANTIALIAS)
-        white_circle.putalpha(mask2)
 
-        draw = ImageDraw.Draw(background, "RGBA")
+        draw = ImageDraw.Draw(background)
         
-
         # Empty Progress Bar (Gray)
         bar_offset_x = 292
         bar_offset_y = 100
         bar_offset_x_1 = 1200
         bar_offset_y_1 = bar_offset_y + 30
-        #circle_size = bar_offset_y_1 - bar_offset_y  # Diameter
 
         # Rectangle to cover most of the bar (and then circles are added to each side of the bar to make it look like a round bar).
         draw.rectangle((bar_offset_x, bar_offset_y, bar_offset_x_1, bar_offset_y_1), fill="#727175")
-        
-        ## Left Circle
-        #draw.ellipse((bar_offset_x - circle_size // 2, bar_offset_y, bar_offset_x + circle_size // 2, bar_offset_y_1), fill="#727175")
-        ## Right Circle
-        #draw.ellipse((bar_offset_x_1 - circle_size // 2, bar_offset_y, bar_offset_x_1 + circle_size // 2, bar_offset_y_1), fill="#727175")
 
-        ## Making edges round
-        ## Top right
-        #dot = "#080b0c"
-        #draw.ellipse((1200 - circle_size // 2, -20, 1200 + circle_size // 2, 20), fill=boundary_fill_colour)
-        #draw.ellipse((1180 - circle_size // 2, 0, 1180 + circle_size // 2, 40), fill=dot)
 
-        ## Bottom right
-        #draw.ellipse((1200 - circle_size // 2, 280, 1200 + circle_size // 2, 320), fill=boundary_fill_colour)
-        #draw.ellipse((1180 - circle_size // 2, 260, 1180 + circle_size // 2, 300), fill=dot)
-
-        ## Bottom left
-        #draw.ellipse((0 - circle_size // 2, 280, 0 + circle_size // 2, 320), fill=boundary_fill_colour)
-        #draw.ellipse((20 - circle_size // 2, 260, 20 + circle_size // 2, 300), fill=dot)
-
-        ## Top left
-        #draw.ellipse((0 - circle_size // 2, -20, 0 + circle_size // 2, 20), fill=boundary_fill_colour)
-        #draw.ellipse((20 - circle_size // 2, 0, 20 + circle_size // 2, 40), fill=dot)
-
+        # Making rounded corners
+        im = background
+        rad = 153
+        circle = Image.new('L', (rad * 2, rad * 2), 0)
+        draw2 = ImageDraw.Draw(circle)
+        draw2.ellipse((0, 0, rad * 2, rad * 2), fill=255)
+        alpha = Image.new('L', im.size, 255)
+        w, h = im.size
+        alpha.paste(circle.crop((0, 0, rad, rad)), (0, 0))
+        alpha.paste(circle.crop((0, rad, rad, rad * 2)), (0, h - rad))
+        alpha.paste(circle.crop((rad, 0, rad * 2, rad)), (w - rad, 0))
+        alpha.paste(circle.crop((rad, rad, rad * 2, rad * 2)), (w - rad, h - rad))
+        alpha.convert('RGBA')
+        im.putalpha(alpha)
+        background = im
 
         # Level and rank characters
         text_size = draw.textsize(str(level), font=big_font)
@@ -624,16 +604,12 @@ class Levelcog(commands.Cog):
         offset_y = 180
         draw.text((offset_x + 15, offset_y - 50), str(level), font=big_font, fill=theme_colour)
 
-        text_size = draw.textsize("LEVEL", font=small_font)
-        #offset_x -= text_size[0] + 5
         draw.text((offset_x, offset_y + 60), "LEVEL", font=small_font, fill=theme_colour)
 
         text_size = draw.textsize(f"#{rank}", font=big_font)
         offset_x -= text_size[0] + 60
         draw.text((offset_x - 22, offset_y - 50), f"#{rank}", font=big_font, fill="#fff")
 
-        text_size = draw.textsize("RANK", font=small_font)
-        #offset_x -= text_size[0] + 5
         draw.text((offset_x, offset_y + 60), "RANK", font=small_font, fill="#fff")
 
         # Filling Bar
@@ -647,25 +623,16 @@ class Levelcog(commands.Cog):
         # Progress Bar (coloured, we make a rectangle first that covers most of the area that is supposed to be highlighted.)
         draw.rectangle((bar_offset_x, bar_offset_y, bar_offset_x_1, bar_offset_y_1), fill=theme_colour)
 
-        ## Left Circle of the progress bar (coloured)
-        #draw.ellipse((bar_offset_x - circle_size // 2, bar_offset_y, bar_offset_x + circle_size // 2, bar_offset_y_1), fill=theme_colour)
-
-        ## Right Circle of the progress bar (coloured)
-        #draw.ellipse((bar_offset_x_1 - circle_size // 2, bar_offset_y, bar_offset_x_1 + circle_size // 2, bar_offset_y_1), fill=theme_colour)
-
         # XP counter
-        text_size = draw.textsize(f"/ {finalpoints} XP", font=small_font)
 
         offset_x = 680
         offset_y = bar_offset_y - 5
 
         # Points marker 
         draw.text((offset_x, offset_y), f"/ {finalpoints:,} XP", font=small_font, fill="#fff")
-
         text_size = draw.textsize(f"{xp:,}", font=small_font)
         offset_x -= text_size[0] + 8
         draw.text((offset_x, offset_y), f"{xp:,}", font=small_font, fill="#fff")
-
 
         # User name
         text_size = draw.textsize(username, font=medium_font)
@@ -675,10 +642,9 @@ class Levelcog(commands.Cog):
 
         # Users discriminator
         offset_x += text_size[0] + 5
-
         draw.text((offset_x, offset_y), discriminator, font=medium_font, fill="#fff")
-        background.paste(white_circle, (0, 0), mask=white_circle)
-        background.paste(logo, (15, 15), mask=logo)
+
+        background.paste(logo, (0, 0), mask=logo)
         background.save("rankcard1.png")
         await ctx.send(file = discord.File("rankcard1.png"))
 
