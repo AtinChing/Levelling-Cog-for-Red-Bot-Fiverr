@@ -31,6 +31,7 @@ class Levelcog(commands.Cog):
         self.muted_get_xp = json_dict['muted_xp']
         self.deafened_get_xp = json_dict['deafened_xp']
         self.valid_days = ['sunday', 'monday', 'tuesday', 'wednesday', 'thursday', 'friday', 'saturday']
+        self.leaderboard_embed_list = None # List of embeds used to contain the leaderboard.
         self.connect_to_db()
 
     def connect_to_db(self):
@@ -85,6 +86,7 @@ class Levelcog(commands.Cog):
                         'total_xp' : 0,
                         'voice_xp' : 0, 
                         'time_spent_in_vc' : 0, # Note: time_spent_in_vc is in minutes
+                        'messages_sent' : 0, # Amount of messages sent by the user within the server (ones only tracked when the bot is online)
                         'background' : None 
             })
             return True # Could register user into the db    
@@ -126,7 +128,9 @@ class Levelcog(commands.Cog):
     async def on_message(self, message : discord.Message):
         author = message.author
         if author.bot: return
+        self.update_user_in_db(author) # Checks and registers users 
         if self.connected: 
+            self.collection.update_one({'_id' : author.id}, {'$inc' : {'messages_sent' : 1}})
             entry = self.collection.find_one({'_id' : author.id}) 
             json_dict = json.load(open('data.json', 'r'))
             time_diff = datetime.datetime.now() - datetime.datetime.fromisoformat(json_dict['last_messages'][str(author.id)]) # The difference in time/time passed between the last message the user sent and the message they just sent.
@@ -137,11 +141,22 @@ class Levelcog(commands.Cog):
                 if calendar.day_name[datetime.datetime.now().weekday()].lower in json_dict['bonus_days']: # If today is one of the bonus xp days:
                     self.collection.update_one({'_id' : author.id}, {'$inc' : {'bonus_xp' : self.xp_per_message * self.bonus_xp_rate}})
                     self.update_user_in_db(author)
-            elif entry == None: self.register_user(author)
+            
             with open('data.json', 'w') as file:
                 json.dump(json_dict, file, indent=4)
     
-
+    @commands.Cog.listener()
+    async def on_reaction_add(self, reaction, user):
+        if user.bot: return
+        message : discord.Message = reaction.message
+        if not self.leaderboard_embed_list is None and "Leaderboard" in message.embeds[0].title:
+            i = -1
+            for embed in self.leaderboard_embed_list: #  Iterate through all the embeds in the leaderboard embed list and return the index of the embed that is currently being shown in the current leaderboard message.
+                if embed == reaction.message.embeds[0]: 
+                    i = self.leaderboard_embed_list.index(embed)
+            if reaction.emoji == '▶': 
+                await message.edit(embed=self.leaderboard_embed_list[i + 1])
+            elif reaction.emoji == '◀': await message.edit(embed=self.leaderboard_embed_list[i - 1])
 
     @commands.command()
     async def status(self, ctx, *args): # Returns embed containing the bot's status, like its connection to the database, latency etc.
@@ -481,18 +496,23 @@ class Levelcog(commands.Cog):
                     embed = discord.Embed(title='Leaderboard ' + "(Showing " + str(i + 1) + " - " + str(len(leaderboard)) + ")", description='')
                     while i <= total_count - 1 and (i == 0 or i % 10 != 0):
                         user_dict = self.collection.find_one({'_id' : leaderboard[i]['_id']})
-                        embed.description += str(i + 1) + '. ' + self.bot.get_user(leaderboard[i]['_id']).name + ' :military_medal: ' + str(user_dict['level']) + '\n' + str(user_dict['total_xp']) + " XP  :microphone2: " + str(round(user_dict['time_spent_in_vc']/60, 1)) + "  :trophy: " + str(user_dict['bonus_xp'])  + '\n'
+                        user_dict['invites_sent'] = 0
+                        for invite in await ctx.guild.invites():
+                            if invite.inviter.id == user_dict['_id']:
+                                user_dict['invites_sent'] += 1
+                        embed.description += str(i + 1) + '. ' + self.bot.get_user(leaderboard[i]['_id']).name + '  :military_medal: ' + str(user_dict['level']) + '\n' + str(user_dict['total_xp']) + " XP  :writing_hand:" + str(user_dict['messages_sent']) + "  :microphone2:" + str(round(user_dict['time_spent_in_vc']/60, 1)) + " :envelope:" + str(user_dict['invites_sent']) + "  :trophy:" + str(user_dict['bonus_xp'])  + '\n'
                         i += 1
                     embed_list.append(embed)
                 total_count -= 10
-            
+            if embed_list == []: self.leaderboard_embed_list = None
+            else: self.leaderboard_embed_list = embed_list
             if len(embed_list) > 0:
                 for e in embed_list:
                     e.set_footer(text = str(datetime.datetime.now().strftime("%d/%m/%Y %H:%M:%S")))
                     e.set_thumbnail(url=ctx.guild.icon_url)
                     msg_send : discord.Message = await ctx.send(embed=e)
-                    #await msg_send.add_reaction(":▶:")
-                    #await msg_send.add_reaction(":arrow_left:")
+                    await msg_send.add_reaction("\U000025c0")
+                    await msg_send.add_reaction("\U000025b6")
                     #await msg_send.add_reaction(":x:")
 
     @commands.command(name='set_background')
