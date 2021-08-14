@@ -32,6 +32,7 @@ class Levelcog(commands.Cog):
         self.deafened_get_xp = json_dict['deafened_xp']
         self.valid_days = ['sunday', 'monday', 'tuesday', 'wednesday', 'thursday', 'friday', 'saturday']
         self.leaderboard_embed_list = None # List of embeds used to contain the leaderboard.
+        self.current_leaderboard_message = None # Current message thats supposed to contain the leaderboard.
         self.connect_to_db()
 
     def connect_to_db(self):
@@ -152,8 +153,10 @@ class Levelcog(commands.Cog):
         if not self.leaderboard_embed_list is None and "Leaderboard" in message.embeds[0].title:
             i = -1
             for embed in self.leaderboard_embed_list: #  Iterate through all the embeds in the leaderboard embed list and return the index of the embed that is currently being shown in the current leaderboard message.
-                if embed == reaction.message.embeds[0]: 
+                print(embed.footer == message.embeds[0].footer)
+                if embed.footer == message.embeds[0].footer: # If the message that was reacted to is the message that currently/supposedly is the message thats supposed to have the leaderboard.
                     i = self.leaderboard_embed_list.index(embed)
+            print(i)
             if reaction.emoji == '▶': 
                 await message.edit(embed=self.leaderboard_embed_list[i + 1])
             elif reaction.emoji == '◀': await message.edit(embed=self.leaderboard_embed_list[i - 1])
@@ -487,33 +490,44 @@ class Levelcog(commands.Cog):
     @commands.command()
     async def leaderboard(self, ctx):
         if self.connected:
-            leaderboard = list(self.collection.find({}).sort('total_xp', pymongo.DESCENDING).limit(10))
+            leaderboard = list(self.collection.find({}).sort('total_xp', pymongo.DESCENDING))
             total_count = len(leaderboard)
             embed_list = []
             i = 0
-            while total_count >= 1: # Keep making pages as long as there are user entries left.
-                if total_count > 0 and total_count <= 10:
-                    embed = discord.Embed(title='Leaderboard ' + "(Showing " + str(i + 1) + " - " + str(len(leaderboard)) + ")", description='')
-                    while i <= total_count - 1 and (i == 0 or i % 10 != 0):
+            while i < total_count - 1: # Keep making pages as long as there are user entries left.
+                embed = discord.Embed(title='Leaderboard ' + "(Showing " + str(i + 1) + " - " + str(len(leaderboard)) + ")", description='')
+                current_embed_amount = 0
+                print(i)
+                print(total_count)
+                while (current_embed_amount < 10 and i < total_count - 1):
+                    print(i)
+                    try:
                         user_dict = self.collection.find_one({'_id' : leaderboard[i]['_id']})
-                        user_dict['invites_sent'] = 0
-                        for invite in await ctx.guild.invites():
-                            if invite.inviter.id == user_dict['_id']:
-                                user_dict['invites_sent'] += 1
-                        embed.description += str(i + 1) + '. ' + self.bot.get_user(leaderboard[i]['_id']).name + '  :military_medal: ' + str(user_dict['level']) + '\n' + str(user_dict['total_xp']) + " XP  :writing_hand:" + str(user_dict['messages_sent']) + "  :microphone2:" + str(round(user_dict['time_spent_in_vc']/60, 1)) + " :envelope:" + str(user_dict['invites_sent']) + "  :trophy:" + str(user_dict['bonus_xp'])  + '\n'
-                        i += 1
-                    embed_list.append(embed)
-                total_count -= 10
+                    except IndexError:
+                        print(i)
+                        print(total_count)
+                        exit()
+                    user_dict['invites_sent'] = 0
+                    for invite in await ctx.guild.invites():
+                        if invite.inviter.id == user_dict['_id']:
+                            user_dict['invites_sent'] += 1
+                    embed.description += str(i + 1) + '. ' + self.bot.get_user(leaderboard[i]['_id']).name + '  :military_medal: ' + str(user_dict['level']) + '\n' + str(user_dict['total_xp']) + " XP  :writing_hand:" + str(user_dict['messages_sent']) + "  :microphone2:" + str(round(user_dict['time_spent_in_vc']/60, 1)) + " :envelope:" + str(user_dict['invites_sent']) + "  :trophy:" + str(user_dict['bonus_xp'])  + '\n'
+                    i += 1
+                    current_embed_amount += 1
+                
+                embed.set_footer(text = str(datetime.datetime.now().strftime("%d/%m/%Y %H:%M:%S")))
+                embed.set_thumbnail(url=ctx.guild.icon_url)
+                embed_list.append(embed)
+
             if embed_list == []: self.leaderboard_embed_list = None
             else: self.leaderboard_embed_list = embed_list
             if len(embed_list) > 0:
-                for e in embed_list:
-                    e.set_footer(text = str(datetime.datetime.now().strftime("%d/%m/%Y %H:%M:%S")))
-                    e.set_thumbnail(url=ctx.guild.icon_url)
-                    msg_send : discord.Message = await ctx.send(embed=e)
-                    await msg_send.add_reaction("\U000025c0")
-                    await msg_send.add_reaction("\U000025b6")
-                    #await msg_send.add_reaction(":x:")
+                msg_sent : discord.Message = await ctx.send(embed=embed_list[0])
+                await msg_sent.add_reaction("\U000025c0")
+                await msg_sent.add_reaction("\U000025b6")
+                self.current_leaderboard_message = msg_sent
+            for e in embed_list:
+                print(e.description)
 
     @commands.command(name='set_background')
     async def set_background(self, ctx, *args):
