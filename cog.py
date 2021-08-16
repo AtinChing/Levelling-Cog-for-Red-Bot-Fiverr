@@ -147,20 +147,20 @@ class Levelcog(commands.Cog):
                 json.dump(json_dict, file, indent=4)
     
     @commands.Cog.listener()
-    async def on_reaction_add(self, reaction, user):
+    async def on_reaction_add(self, reaction : discord.Reaction, user):
         if user.bot: return
         message : discord.Message = reaction.message
         if not self.leaderboard_embed_list is None and "Leaderboard" in message.embeds[0].title:
             i = -1
             for embed in self.leaderboard_embed_list: #  Iterate through all the embeds in the leaderboard embed list and return the index of the embed that is currently being shown in the current leaderboard message.
-                print(embed.footer == message.embeds[0].footer)
-                if embed.footer == message.embeds[0].footer: # If the message that was reacted to is the message that currently/supposedly is the message thats supposed to have the leaderboard.
+                print(embed.title == message.embeds[0].title)
+                if embed.title == message.embeds[0].title: # If the message that was reacted to is the message that currently/supposedly is the message thats supposed to have the leaderboard.
                     i = self.leaderboard_embed_list.index(embed)
             print(i)
             if reaction.emoji == '▶': 
                 await message.edit(embed=self.leaderboard_embed_list[i + 1])
             elif reaction.emoji == '◀': await message.edit(embed=self.leaderboard_embed_list[i - 1])
-
+            await message.remove_reaction(reaction.emoji, user)
     @commands.command()
     async def status(self, ctx, *args): # Returns embed containing the bot's status, like its connection to the database, latency etc.
         if not self.check_perms(ctx.author): return
