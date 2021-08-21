@@ -91,6 +91,7 @@ class Levelcog(commands.Cog):
                         'background' : None 
             })
             return True # Could register user into the db    
+
         except(Exception): return False # Exception occurred and so we can't add the user.
     def update_user_in_db(self, user): # Updates the level field of a user, in the db, accordingly with the users total xp. Called whenever the normal_xp or bonus_xp of a user is changed.
         try:
@@ -100,7 +101,8 @@ class Levelcog(commands.Cog):
             self.collection.update_one({'_id' : user.id}, {'$set' : {'level' : self.determine_level(cloned_dict['total_xp'])}}) # Then it updates the users level field, in the db, accordingly with the users total_xp.
         except(Exception):
             self.register_user(user) # Registers user if they weren't in DB.
-
+        json_data = json.load(open('data.json', 'r'))
+        
     def check_perms(self, user : discord.Member): # Takes in a user and checks and returns whether they have server admin perms
         return user.guild_permissions.administrator # Used for all admin-level commands.
 
@@ -157,10 +159,12 @@ class Levelcog(commands.Cog):
                 if embed.title == message.embeds[0].title: # If the message that was reacted to is the message that currently/supposedly is the message thats supposed to have the leaderboard.
                     i = self.leaderboard_embed_list.index(embed)
             print(i)
-            if reaction.emoji == '▶': 
+            if reaction.emoji == '▶' and i != len(self.leaderboard_embed_list) - 1: 
                 await message.edit(embed=self.leaderboard_embed_list[i + 1])
-            elif reaction.emoji == '◀': await message.edit(embed=self.leaderboard_embed_list[i - 1])
+            elif reaction.emoji == '◀' and i != 0: await message.edit(embed=self.leaderboard_embed_list[i - 1])
+            
             await message.remove_reaction(reaction.emoji, user)
+
     @commands.command()
     async def status(self, ctx, *args): # Returns embed containing the bot's status, like its connection to the database, latency etc.
         if not self.check_perms(ctx.author): return
@@ -497,15 +501,10 @@ class Levelcog(commands.Cog):
             while i < total_count - 1: # Keep making pages as long as there are user entries left.
                 embed = discord.Embed(title='Leaderboard ' + "(Showing " + str(i + 1) + " - " + str(len(leaderboard)) + ")", description='')
                 current_embed_amount = 0
-                print(i)
-                print(total_count)
                 while (current_embed_amount < 10 and i < total_count - 1):
-                    print(i)
                     try:
                         user_dict = self.collection.find_one({'_id' : leaderboard[i]['_id']})
                     except IndexError:
-                        print(i)
-                        print(total_count)
                         exit()
                     user_dict['invites_sent'] = 0
                     for invite in await ctx.guild.invites():
@@ -514,7 +513,7 @@ class Levelcog(commands.Cog):
                     embed.description += str(i + 1) + '. ' + self.bot.get_user(leaderboard[i]['_id']).name + '  :military_medal: ' + str(user_dict['level']) + '\n' + str(user_dict['total_xp']) + " XP  :writing_hand:" + str(user_dict['messages_sent']) + "  :microphone2:" + str(round(user_dict['time_spent_in_vc']/60, 1)) + " :envelope:" + str(user_dict['invites_sent']) + "  :trophy:" + str(user_dict['bonus_xp'])  + '\n'
                     i += 1
                     current_embed_amount += 1
-                
+                embed.set_title(embed.title.split('-')[0] + ' - ' + str(current_embed_amount) + ')')
                 embed.set_footer(text = str(datetime.datetime.now().strftime("%d/%m/%Y %H:%M:%S")))
                 embed.set_thumbnail(url=ctx.guild.icon_url)
                 embed_list.append(embed)
@@ -549,6 +548,35 @@ class Levelcog(commands.Cog):
         if self.connected:
             self.collection.update_one({'_id' : user.id}, {'$set' : {'background' : None}})
             await ctx.send(user.mention + "'s background has been reset.")
+
+    @commands.command(name='add_role')
+    async def add_role(self, ctx, level_arg, role_name, *args):
+        try:
+            level = int(level_arg)
+            if level < 1:
+                raise Exception
+        except(Exception):
+            await ctx.send('The level you passed in was invalid!')
+            return
+        new_role = await ctx.guild.create_role(name=role_name)
+        json_data = json.load(open('data.json', 'r'))
+        json_data['roles'].append({'name' : role_name, 'level-required' : level})
+        with open('data.json', 'w') as f: 
+            json.dump(json_data, f, indent=4)
+        await ctx.send('Added a role named "' + role_name + '", which is given to users as soon as they reach level ' + level_arg)
+
+    @commands.command()
+    async def remove_role(self, ctx, role_name, *args):
+        json_data = json.load(open('data.json', 'r'))
+        for role in json_data['roles']:
+            if role['name'] == role_name:
+                json_data['roles'].remove(role)
+                with open('data.json', 'w') as f:
+                    json.dump(json_data, f, indent=4)
+                await c
+                await ctx.send('Successfully removed the ' + role_name + ' role.')
+                return
+        await ctx.send('That role does not exist!') # If we're able to break out of the loop without returning first, then that means we could not find the role_name in any of the role objects in the roles array.
 
     @commands.command()
     async def rank(self, ctx):
