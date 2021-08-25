@@ -93,6 +93,7 @@ class Levelcog(commands.Cog):
             return True # Could register user into the db    
 
         except(Exception): return False # Exception occurred and so we can't add the user.
+
     def update_user_in_db(self, user): # Updates the level field of a user, in the db, accordingly with the users total xp. Called whenever the normal_xp or bonus_xp of a user is changed.
         try:
             cloned_dict = dict(self.collection.find_one({'_id' : user.id}))
@@ -135,18 +136,34 @@ class Levelcog(commands.Cog):
         if self.connected: 
             self.collection.update_one({'_id' : author.id}, {'$inc' : {'messages_sent' : 1}})
             entry = self.collection.find_one({'_id' : author.id}) 
-            json_dict = json.load(open('data.json', 'r'))
-            time_diff = datetime.datetime.now() - datetime.datetime.fromisoformat(json_dict['last_messages'][str(author.id)]) # The difference in time/time passed between the last message the user sent and the message they just sent.
-            json_dict['last_messages'][str(author.id)] =  str(datetime.datetime.now()) # Updating the last_message entry in the json.
-            if entry != None and message.channel.id not in json_dict['blacklisted']['channels'] and message.channel.category_id not in json_dict['blacklisted']['categories'] and time_diff >= datetime.timedelta(seconds=10): # If the entry could be extracted from the database and if the channel or category the message was sent isn't blacklisted.
+            json_data = json.load(open('data.json', 'r'))
+            time_diff = datetime.datetime.now() - datetime.datetime.fromisoformat(json_data['last_messages'][str(author.id)]) # The difference in time/time passed between the last message the user sent and the message they just sent.
+            old_user_level = self.collection.find_one({'_id' : author.id})['level']
+            json_data['last_messages'][str(author.id)] =  str(datetime.datetime.now()) # Updating the last_message entry in the json.
+            if entry != None and message.channel.id not in json_data['blacklisted']['channels'] and message.channel.category_id not in json_data['blacklisted']['categories'] and time_diff >= datetime.timedelta(seconds=10): # If the entry could be extracted from the database and if the channel or category the message was sent isn't blacklisted.
                 self.collection.update_one({'_id' : author.id}, {'$inc' : {'normal_xp' : self.xp_per_message}, '$set' : {'level' : self.determine_level(entry['normal_xp'] + self.xp_per_message)}})
                 self.update_user_in_db(author)
-                if calendar.day_name[datetime.datetime.now().weekday()].lower in json_dict['bonus_days']: # If today is one of the bonus xp days:
+                if calendar.day_name[datetime.datetime.now().weekday()].lower in json_data['bonus_days']: # If today is one of the bonus xp days:
                     self.collection.update_one({'_id' : author.id}, {'$inc' : {'bonus_xp' : self.xp_per_message * self.bonus_xp_rate}})
                     self.update_user_in_db(author)
-            
+            new_user_level = self.collection.find_one({'_id' : author.id})['level']
+            if new_user_level > old_user_level: # If user's level increased, we send a message.
+                channel = get(message.guild.roles, id=json_data['level_up_channel'])
+                if channel == None:
+                    return
+                await channel.send('Congratulations, ' + author.mention + "! You've reached level " + str(new_user_level) + "!")
+                for role in json_data['roles']: # Iterating through all the level-binded roles to see if anyone of them are associated to the level the user just reached. 
+                    if role['level-required'] == new_user_level:  
+                        await author.add_roles(get(message.guild.roles, name=role['name']))
+                        await channel.send('You now have the ' + role['name'] + ' role!')
+                        user_roles = [] 
+                        for f in author.roles:
+                            user_roles.append(f.name)
+                        for r in json_data['roles']: # Removing the previous level roles from the user.
+                            if r['name'] in user_roles and r['level-required'] != new_user_level:
+                                await author.remove_roles(get(message.guild.roles, name=r['name']))
             with open('data.json', 'w') as file:
-                json.dump(json_dict, file, indent=4)
+                json.dump(json_data, file, indent=4)
     
     @commands.Cog.listener()
     async def on_reaction_add(self, reaction : discord.Reaction, user):
@@ -174,6 +191,20 @@ class Levelcog(commands.Cog):
         embed.add_field(name='Latency', value=self.bot.latency, inline=True)
         embed.set_thumbnail(url=self.bot.user.avatar_url)
         await ctx.send(embed=embed)
+
+    @commands.command()
+    async def set_level_up_channel(self, ctx, channel, *args):
+        if not self.check_perms(ctx.author): return
+        try:
+            channel = self.bot.get_channel(int(channel.replace('<', '').replace('>', '').replace('#', '')))
+        except(Exception): # if there was an error while trying to get the channel
+            await ctx.send('The channel you sent in could not be found!')
+            return
+        json_data = json.load(open('data.json', 'r'))
+        json_data['level_up_channel'] = channel.id
+        with open('data.json', 'w') as f:
+            json.dump(json_data, f, indent=4)
+
 
     @commands.command()
     async def initialise(self, ctx, *args):
@@ -550,7 +581,8 @@ class Levelcog(commands.Cog):
             await ctx.send(user.mention + "'s background has been reset.")
 
     @commands.command(name='add_role')
-    async def add_role(self, ctx, level_arg, role_name, *args):
+    async def add_role(self, ctx, level_arg, *role_name):
+        role_name = " ".join(role_name)
         try:
             level = int(level_arg)
             if level < 1:
@@ -558,12 +590,15 @@ class Levelcog(commands.Cog):
         except(Exception):
             await ctx.send('The level you passed in was invalid!')
             return
-        new_role = await ctx.guild.create_role(name=role_name)
+        result = get(ctx.guild.roles, name=role_name)
+        if result == None:
+            await ctx.send('The role name you passed in does not exist in the server!')
+            return
         json_data = json.load(open('data.json', 'r'))
         json_data['roles'].append({'name' : role_name, 'level-required' : level})
         with open('data.json', 'w') as f: 
             json.dump(json_data, f, indent=4)
-        await ctx.send('Added a role named "' + role_name + '", which is given to users as soon as they reach level ' + level_arg)
+        await ctx.send('Role named "' + role_name + '", which is given to users as soon as they reach level ' + level_arg)
 
     @commands.command()
     async def remove_role(self, ctx, role_name, *args):
@@ -573,7 +608,6 @@ class Levelcog(commands.Cog):
                 json_data['roles'].remove(role)
                 with open('data.json', 'w') as f:
                     json.dump(json_data, f, indent=4)
-                await c
                 await ctx.send('Successfully removed the ' + role_name + ' role.')
                 return
         await ctx.send('That role does not exist!') # If we're able to break out of the loop without returning first, then that means we could not find the role_name in any of the role objects in the roles array.

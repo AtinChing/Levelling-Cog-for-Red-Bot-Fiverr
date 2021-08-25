@@ -5,17 +5,25 @@
     "solo_xp": true,
     "muted_xp": false,
     "deafened_xp": false,
+    "level_up_channel": null,
     "bonus_days": [
         "monday"
     ],
     "blacklisted": {
-        "channels": [
-            868919518934732820
-        ],
+        "channels": [],
         "categories": []
     },
     "last_messages": {
-        "244361629754458113": "2021-08-21 03:39:19.259800"
+        "244361629754458113": "2021-08-25 09:21:13.961524"
     },
-    "roles": []
+    "roles": [
+        {
+            "name": "Level5+",
+            "level-required": 5
+        },
+        {
+            "name": "Level 6+",
+            "level-required": 6
+        }
+    ]
 }
