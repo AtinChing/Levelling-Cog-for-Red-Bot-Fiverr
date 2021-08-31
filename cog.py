@@ -6,7 +6,8 @@ from discord import user
 from discord.ext import commands
 from discord.ext.commands.errors import CommandInvokeError, MemberNotFound
 from discord.utils import get
-import datetime
+from datetime import timedelta
+from datetime import datetime
 import pymongo
 from pymongo import MongoClient
 import json
@@ -137,31 +138,36 @@ class Levelcog(commands.Cog):
             self.collection.update_one({'_id' : author.id}, {'$inc' : {'messages_sent' : 1}})
             entry = self.collection.find_one({'_id' : author.id}) 
             json_data = json.load(open('data.json', 'r'))
-            time_diff = datetime.datetime.now() - datetime.datetime.fromisoformat(json_data['last_messages'][str(author.id)]) # The difference in time/time passed between the last message the user sent and the message they just sent.
+            time_diff = datetime.now() - datetime.fromisoformat(json_data['last_messages'][str(author.id)]) # The difference in time/time passed between the last message the user sent and the message they just sent.
             old_user_level = self.collection.find_one({'_id' : author.id})['level']
-            json_data['last_messages'][str(author.id)] =  str(datetime.datetime.now()) # Updating the last_message entry in the json.
-            if entry != None and message.channel.id not in json_data['blacklisted']['channels'] and message.channel.category_id not in json_data['blacklisted']['categories'] and time_diff >= datetime.timedelta(seconds=10): # If the entry could be extracted from the database and if the channel or category the message was sent isn't blacklisted.
+            json_data['last_messages'][str(author.id)] =  str(datetime.now()) # Updating the last_message entry in the json.
+            if entry != None and message.channel.id not in json_data['blacklisted']['channels'] and message.channel.category_id not in json_data['blacklisted']['categories'] and time_diff >= timedelta(seconds=10): # If the entry could be extracted from the database and if the channel or category the message was sent isn't blacklisted.
                 self.collection.update_one({'_id' : author.id}, {'$inc' : {'normal_xp' : self.xp_per_message}, '$set' : {'level' : self.determine_level(entry['normal_xp'] + self.xp_per_message)}})
                 self.update_user_in_db(author)
-                if calendar.day_name[datetime.datetime.now().weekday()].lower in json_data['bonus_days']: # If today is one of the bonus xp days:
+                if calendar.day_name[datetime.now().weekday()].lower in json_data['bonus_days']: # If today is one of the bonus xp days:
                     self.collection.update_one({'_id' : author.id}, {'$inc' : {'bonus_xp' : self.xp_per_message * self.bonus_xp_rate}})
                     self.update_user_in_db(author)
-            new_user_level = self.collection.find_one({'_id' : author.id})['level']
+            user_info = dict(self.collection.find_one({'_id' : author.id}))      
+            new_user_level = user_info['level']
             if new_user_level > old_user_level: # If user's level increased, we send a message.
-                channel = get(message.guild.roles, id=json_data['level_up_channel'])
+                channel = get(message.guild.channels, id=json_data['level_up_channel'])
                 if channel == None:
                     return
-                await channel.send('Congratulations, ' + author.mention + "! You've reached level " + str(new_user_level) + "!")
+                embed = discord.Embed(title='You leveled up!', description=f"Congratulations {author.mention}! You've leveled up to {new_user_level}.")
+                embed.set_thumbnail(url=author.avatar_url)
+                embed.set_footer(text=datetime.now().strftime('%b %d, %Y %I:%M %p'))
                 for role in json_data['roles']: # Iterating through all the level-binded roles to see if anyone of them are associated to the level the user just reached. 
                     if role['level-required'] == new_user_level:  
                         await author.add_roles(get(message.guild.roles, name=role['name']))
-                        await channel.send('You now have the ' + role['name'] + ' role!')
                         user_roles = [] 
                         for f in author.roles:
                             user_roles.append(f.name)
                         for r in json_data['roles']: # Removing the previous level roles from the user.
                             if r['name'] in user_roles and r['level-required'] != new_user_level:
                                 await author.remove_roles(get(message.guild.roles, name=r['name']))
+                        embed.add_field(name='New Level Role', value=f":trophy: {role['name']}")
+                        embed.add_field(name='Current Experience', value=f"{user_info['total_xp']}XP")
+                await channel.send(embed=embed)
             with open('data.json', 'w') as file:
                 json.dump(json_data, file, indent=4)
     
@@ -186,7 +192,7 @@ class Levelcog(commands.Cog):
     async def status(self, ctx, *args): # Returns embed containing the bot's status, like its connection to the database, latency etc.
         if not self.check_perms(ctx.author): return
         embed = discord.Embed(title='Bot Status')
-        embed.set_footer(text=str(datetime.datetime.now().strftime("%d/%m/%Y %H:%M:%S")))
+        embed.set_footer(text=str(datetime.now().strftime("%d/%m/%Y %H:%M:%S")))
         embed.add_field(name='Connection to database', value=self.connected, inline=True)
         embed.add_field(name='Latency', value=self.bot.latency, inline=True)
         embed.set_thumbnail(url=self.bot.user.avatar_url)
@@ -650,6 +656,8 @@ class Levelcog(commands.Cog):
         discriminator = "#" + author.discriminator
         username = author.name
         xp = member_dict["total_xp"] - self.determine_xp(level)
+        print(self.determine_xp(level + 1))
+        print(self.determine_xp(level))
         finalpoints = self.determine_xp(level + 1) - self.determine_xp(level)
         theme_colour = "#ff4d00ff" # #ff4d00ff is orangish
         font = "OpenSans-Regular.ttf"
