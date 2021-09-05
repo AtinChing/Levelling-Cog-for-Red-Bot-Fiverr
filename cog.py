@@ -31,6 +31,7 @@ class Levelcog(commands.Cog):
         self.solo_get_xp = json_dict['solo_xp']
         self.muted_get_xp = json_dict['muted_xp']
         self.deafened_get_xp = json_dict['deafened_xp']
+        self.levelfactor = json_dict['level_factor']
         self.valid_days = ['sunday', 'monday', 'tuesday', 'wednesday', 'thursday', 'friday', 'saturday']
         self.leaderboard_embed_list = None # List of embeds used to contain the leaderboard.
         self.current_leaderboard_message = None # Current message thats supposed to contain the leaderboard.
