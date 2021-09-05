@@ -52,9 +52,8 @@ class Levelcog(commands.Cog):
         level = 1
         totalpointreq = 250
         currentpointreq = 250
-        pointreqchange = 150
+        pointreqchange = self.levelfactor # levelfactor is 150 by default.
         if xp > 100:
-            level += 1
             while xp >= totalpointreq:
                 level += 1
                 currentpointreq += pointreqchange
@@ -65,9 +64,8 @@ class Levelcog(commands.Cog):
         lev = 1
         totalpointreq = 0
         currentpointreq = 100
-        pointreqchange = 150
+        pointreqchange = self.levelfactor # levelfactor is 150 by default.
         if level > 1:
-            lev += 1
             while level > lev:
                 currentpointreq += pointreqchange
                 totalpointreq += currentpointreq
@@ -178,10 +176,8 @@ class Levelcog(commands.Cog):
         if not self.leaderboard_embed_list is None and "Leaderboard" in message.embeds[0].title:
             i = -1
             for embed in self.leaderboard_embed_list: #  Iterate through all the embeds in the leaderboard embed list and return the index of the embed that is currently being shown in the current leaderboard message.
-                print(embed.title == message.embeds[0].title)
                 if embed.title == message.embeds[0].title: # If the message that was reacted to is the message that currently/supposedly is the message thats supposed to have the leaderboard.
                     i = self.leaderboard_embed_list.index(embed)
-            print(i)
             if reaction.emoji == '▶' and i != len(self.leaderboard_embed_list) - 1: 
                 await message.edit(embed=self.leaderboard_embed_list[i + 1])
             elif reaction.emoji == '◀' and i != 0: await message.edit(embed=self.leaderboard_embed_list[i - 1])
@@ -531,10 +527,12 @@ class Levelcog(commands.Cog):
     @commands.command()
     async def leaderboard(self, ctx):
         if self.connected:
+            msg_sent : discord.Message = await ctx.send("Fetching member data...")
             leaderboard = list(self.collection.find({}).sort('total_xp', pymongo.DESCENDING))
             total_count = len(leaderboard)
             embed_list = []
             i = 0
+            first_current_datetime = datetime.now()
             while i < total_count - 1: # Keep making pages as long as there are user entries left.
                 embed = discord.Embed(title='Leaderboard ' + "(Showing " + str(i + 1) + " - " + str(len(leaderboard)) + ")", description='')
                 current_embed_amount = 0
@@ -550,20 +548,22 @@ class Levelcog(commands.Cog):
                     embed.description += str(i + 1) + '. ' + self.bot.get_user(leaderboard[i]['_id']).name + '  :military_medal: ' + str(user_dict['level']) + '\n' + str(user_dict['total_xp']) + " XP  :writing_hand:" + str(user_dict['messages_sent']) + "  :microphone2:" + str(round(user_dict['time_spent_in_vc']/60, 1)) + " :envelope:" + str(user_dict['invites_sent']) + "  :trophy:" + str(user_dict['bonus_xp'])  + '\n'
                     i += 1
                     current_embed_amount += 1
-                embed.set_title(embed.title.split('-')[0] + ' - ' + str(current_embed_amount) + ')')
-                embed.set_footer(text = str(datetime.datetime.now().strftime("%d/%m/%Y %H:%M:%S")))
+                embed.title = embed.title.split('-')[0] + ' - ' + str(embed.description.split('\n')[-3].split('.')[0]) + ')'
+                embed.set_footer(text = str(first_current_datetime.strftime("%d/%m/%Y %H:%M:%S")))
                 embed.set_thumbnail(url=ctx.guild.icon_url)
                 embed_list.append(embed)
 
             if embed_list == []: self.leaderboard_embed_list = None
             else: self.leaderboard_embed_list = embed_list
             if len(embed_list) > 0:
-                msg_sent : discord.Message = await ctx.send(embed=embed_list[0])
+                await msg_sent.edit(content=None, embed=embed_list[0])
                 await msg_sent.add_reaction("\U000025c0")
                 await msg_sent.add_reaction("\U000025b6")
                 self.current_leaderboard_message = msg_sent
-            for e in embed_list:
-                print(e.description)
+    
+    @commands.command(name='daily_leaderboard')
+    async def daily_leaderboard(self, ctx, *args):
+        embed = discord.Embed()
 
     @commands.command(name='set_background')
     async def set_background(self, ctx, *args):
