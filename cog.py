@@ -8,6 +8,7 @@ from discord.ext.commands.errors import CommandInvokeError, MemberNotFound
 from discord.utils import get
 from datetime import timedelta
 from datetime import datetime
+from datetime import time
 import pymongo
 from pymongo import MongoClient
 import json
@@ -32,6 +33,7 @@ class Levelcog(commands.Cog):
         self.muted_get_xp = json_dict['muted_xp']
         self.deafened_get_xp = json_dict['deafened_xp']
         self.levelfactor = json_dict['level_factor']
+        self.daily_leaderboard_channel = json_dict['daily_leaderboard_channel']
         self.valid_days = ['sunday', 'monday', 'tuesday', 'wednesday', 'thursday', 'friday', 'saturday']
         self.leaderboard_embed_list = None # List of embeds used to contain the leaderboard.
         self.current_leaderboard_message = None # Current message thats supposed to contain the leaderboard.
@@ -74,9 +76,7 @@ class Levelcog(commands.Cog):
         return totalpointreq
 
     def register_user(self, user): # Register user into the database
-        if not self.connected: # If a connection to database hasn't been established 
-            if not self.connect_to_db(): # Trying to make connection here. If we can't then we return false and exit the function
-                return False    
+        if not self.connected and not self.connect_to_db(): return False # If a connection to database hasn't been established then we try to make connection here. If we can't then we return false and exit the function    
         try:    
             self.collection.insert_one({
                         'name' : user.name,
@@ -88,6 +88,8 @@ class Levelcog(commands.Cog):
                         'voice_xp' : 0, 
                         'time_spent_in_vc' : 0, # Note: time_spent_in_vc is in minutes
                         'messages_sent' : 0, # Amount of messages sent by the user within the server (ones only tracked when the bot is online)
+                        'daily_messages_sent' : 0, # Amount of messages sent in the current day
+                        'monthly_messages_sent' : 0, # Amount of messages sent in the current month
                         'background' : None 
             })
             return True # Could register user into the db    
@@ -125,6 +127,22 @@ class Levelcog(commands.Cog):
                             self.update_user_in_db(member)
             self.bot.loop.create_task((self.give_voice_xp(60))) # Check and give voice xp again in 1 minute/60 seconds.
 
+    async def reset_daily_messages(self, delay):
+        await asyncio.sleep(delay)
+        if self.connected:
+            self.collection.update_many({}, {'daily_messages_sent' :  0})
+        current_time = datetime.now()
+        tomorrow = current_time + timedelta(days=1)
+        self.bot.loop.create_task((self.reset_daily_messages((datetime.combine(tomorrow, time.min) - current_time).total_seconds()))) # Calculates the amount of seconds until the day ends, then schedules the reset of all "daily_messages_sent" fields to run after those amount of seconds
+
+    async def reset_monthly_messages(self, delay):
+        await asyncio.sleep(delay)
+        if self.connected:
+            self.collection.update_many({}, {'monthly_messages_sent' : 0})
+        current_time : datetime = datetime.now()
+        last_day = current_time + timedelta(days=(calendar.monthrange(current_time.year, current_time.month)[1] - current_time.day))  
+        self.bot.loop.create_task((self.reset_monthly_messages((datetime.combine(last_day, time.min) - current_time).total_seconds())))
+
     @commands.Cog.listener()
     async def on_ready(self): self.bot.loop.create_task((self.give_voice_xp(60)))
 
@@ -134,17 +152,17 @@ class Levelcog(commands.Cog):
         if author.bot: return
         self.update_user_in_db(author) # Checks and registers users 
         if self.connected: 
-            self.collection.update_one({'_id' : author.id}, {'$inc' : {'messages_sent' : 1}})
+            self.collection.update_one({'_id' : author.id}, {'$inc' : {'messages_sent' : 1, 'daily_messages_sent' : 1, 'monthly_messages_sent' : 1}}) # Increasing the messages_sent, daily_messages_sent and monthly_messages_sent field by 1 because they have to be increased no matter what condition (except for whether the bot is connected to the database of course).
             entry = self.collection.find_one({'_id' : author.id}) 
             json_data = json.load(open('data.json', 'r'))
             time_diff = datetime.now() - datetime.fromisoformat(json_data['last_messages'][str(author.id)]) # The difference in time/time passed between the last message the user sent and the message they just sent.
             old_user_level = self.collection.find_one({'_id' : author.id})['level']
             json_data['last_messages'][str(author.id)] =  str(datetime.now()) # Updating the last_message entry in the json.
             if entry != None and message.channel.id not in json_data['blacklisted']['channels'] and message.channel.category_id not in json_data['blacklisted']['categories'] and time_diff >= timedelta(seconds=10): # If the entry could be extracted from the database and if the channel or category the message was sent isn't blacklisted.
-                self.collection.update_one({'_id' : author.id}, {'$inc' : {'normal_xp' : self.xp_per_message}, '$set' : {'level' : self.determine_level(entry['normal_xp'] + self.xp_per_message)}})
+                self.collection.update_one({'_id' : author.id}, {'$inc' : {'normal_xp' : self.xp_per_message}, '$set' : {'level' : self.determine_level(entry['normal_xp'] + self.xp_per_message)}}) # Updating the normal xp and level fields in the database.
                 self.update_user_in_db(author)
                 if calendar.day_name[datetime.now().weekday()].lower in json_data['bonus_days']: # If today is one of the bonus xp days:
-                    self.collection.update_one({'_id' : author.id}, {'$inc' : {'bonus_xp' : self.xp_per_message * self.bonus_xp_rate}})
+                    self.collection.update_one({'_id' : author.id}, {'$inc' : {'bonus_xp' : self.xp_per_message * self.bonus_xp_rate}}) # Updating the bonus_xp field in the database.
                     self.update_user_in_db(author)
             user_info = dict(self.collection.find_one({'_id' : author.id}))      
             new_user_level = user_info['level']
@@ -194,20 +212,6 @@ class Levelcog(commands.Cog):
         embed.add_field(name='Latency', value=self.bot.latency, inline=True)
         embed.set_thumbnail(url=self.bot.user.avatar_url)
         await ctx.send(embed=embed)
-
-    @commands.command()
-    async def set_level_up_channel(self, ctx, channel, *args):
-        if not self.check_perms(ctx.author): return
-        try:
-            channel = self.bot.get_channel(int(channel.replace('<', '').replace('>', '').replace('#', '')))
-        except(Exception): # if there was an error while trying to get the channel
-            await ctx.send('The channel you sent in could not be found!')
-            return
-        json_data = json.load(open('data.json', 'r'))
-        json_data['level_up_channel'] = channel.id
-        with open('data.json', 'w') as f:
-            json.dump(json_data, f, indent=4)
-
 
     @commands.command()
     async def initialise(self, ctx, *args):
@@ -535,9 +539,10 @@ class Levelcog(commands.Cog):
             i = 0
             first_current_datetime = datetime.now()
             while i < total_count - 1: # Keep making pages as long as there are user entries left.
-                embed = discord.Embed(title='Leaderboard ' + "(Showing " + str(i + 1) + " - " + str(len(leaderboard)) + ")", description='')
+                embed = discord.Embed(title='Leaderboard ' + "(Showing " + str(i + 1) + " - " + str(total_count) + ")", description='')
                 current_embed_amount = 0
                 while (current_embed_amount < 10 and i < total_count - 1):
+                    to_desc = ""
                     try:
                         user_dict = self.collection.find_one({'_id' : leaderboard[i]['_id']})
                     except IndexError:
@@ -546,9 +551,10 @@ class Levelcog(commands.Cog):
                     for invite in await ctx.guild.invites():
                         if invite.inviter.id == user_dict['_id']:
                             user_dict['invites_sent'] += 1
-                    embed.description += str(i + 1) + '. ' + self.bot.get_user(leaderboard[i]['_id']).name + '  :military_medal: ' + str(user_dict['level']) + '\n' + str(user_dict['total_xp']) + " XP  :writing_hand:" + str(user_dict['messages_sent']) + "  :microphone2:" + str(round(user_dict['time_spent_in_vc']/60, 1)) + " :envelope:" + str(user_dict['invites_sent']) + "  :trophy:" + str(user_dict['bonus_xp'])  + '\n'
+                    to_desc += str(i + 1) + '. ' + self.bot.get_user(leaderboard[i]['_id']).name + '  :military_medal: ' + str(user_dict['level']) + '\n' + str(user_dict['total_xp']) + " XP  :writing_hand:" + str(user_dict['messages_sent']) + "  :microphone2:" + str(round(user_dict['time_spent_in_vc']/60, 1)) + " :envelope:" + str(user_dict['invites_sent']) + "  :trophy:" + str(user_dict['bonus_xp'])  + '\n'
                     i += 1
                     current_embed_amount += 1
+                embed.description = to_desc
                 embed.title = embed.title.split('-')[0] + ' - ' + str(embed.description.split('\n')[-3].split('.')[0]) + ')'
                 embed.set_footer(text = str(first_current_datetime.strftime("%d/%m/%Y %H:%M:%S")))
                 embed.set_thumbnail(url=ctx.guild.icon_url)
@@ -563,8 +569,47 @@ class Levelcog(commands.Cog):
                 self.current_leaderboard_message = msg_sent
     
     @commands.command(name='daily_leaderboard')
-    async def daily_leaderboard(self, ctx, *args):
-        embed = discord.Embed()
+    async def daily_leaderboard(self, ctx, interactable=True, *args): # Interactable is whether it should be 
+        if self.connected:
+            if interactable:
+                leaderboard = list(self.collection.find({}).sort('daily_messages_sent', pymongo.DESCENDING))
+                total_count = len(leaderboard)
+                i = 0
+                to_desc = ""
+                while i < total_count - 1:
+                    to_desc += str(i+1) + '. ' + self.bot.get_user(leaderboard[i]['_id']).name + ' :writing_hand:' + str(leaderboard[i]['daily_messages_sent'])    
+            else: # If the leaderboard shouldn't be interactable then it must've been used to send the daily leaderboard in the daily leaderboard channel.
+                if self.daily_leaderboard_channel is None: # So first we make sure that the daily_leaderboard_channel has been set.
+                    return
+                leaderboard = list(self.collection.find({}).sort('daily_messages_sent', pymongo.DESCENDING).limit(10)) # Only going to return the top 10 results
+                i = 0
+                to_desc = ""
+                while i < 9:
+                    to_desc += str(i+1) + '. ' + self.bot.get_user(leaderboard[i]['_id']).name + ' :writing_hand:' + str(leaderboard[i]['daily_messages_sent'])
+                embed = discord.Embed(description=to_desc)
+                embed.set_footer(text = str(datetime.now().strftime("%d/%m/%Y %H:%M:%S")))
+                embed.set_thumbnail(url=ctx.guild.icon_url)
+                await self.daily_leaderboard_channel.send(embed=embed)
+
+
+    @commands.command()
+    async def set_level_up_channel(self, ctx, channel, *args):
+        if not self.check_perms(ctx.author): return
+        try:
+            channel = self.bot.get_channel(int(channel.replace('<', '').replace('>', '').replace('#', '')))
+        except(Exception): # if there was an error while trying to get the channel
+            await ctx.send('The channel you sent in could not be found!')
+            return
+        json_data = json.load(open('data.json', 'r'))
+        json_data['level_up_channel'] = channel.id
+        with open('data.json', 'w') as f:
+            json.dump(json_data, f, indent=4)
+
+
+    @commands.command()
+    async def set_daily_messages_leaderboard_channel(self, ctx, channel, *args):
+        if not self.check_perms(ctx.author): return 
+        # Implement the rest later.
 
     @commands.command(name='set_background')
     async def set_background(self, ctx, *args):
