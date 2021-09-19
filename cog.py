@@ -35,8 +35,6 @@ class Levelcog(commands.Cog):
         self.levelfactor = json_dict['level_factor']
         self.daily_leaderboard_channel = json_dict['daily_leaderboard_channel']
         self.valid_days = ['sunday', 'monday', 'tuesday', 'wednesday', 'thursday', 'friday', 'saturday']
-        self.leaderboard_embed_list = None # List of embeds used to contain the leaderboard.
-        self.current_leaderboard_message = None # Current message thats supposed to contain the leaderboard.
         self.connect_to_db()
 
     def connect_to_db(self):
@@ -192,14 +190,20 @@ class Levelcog(commands.Cog):
     async def on_reaction_add(self, reaction : discord.Reaction, user):
         if user.bot: return
         message : discord.Message = reaction.message
-        if not self.leaderboard_embed_list is None and "Leaderboard" in message.embeds[0].title:
+        json_data = json.load(open('data.json', 'r'))
+        if message.id in json_data['embed_data'] and "Leaderboard" in message.embeds[0].title:
+            try:
+                embed_data : list = json_data['embed_data'][message.id]
+            except(KeyError):
+                await message.remove_reaction(reaction.emoji, user)
+                return
             i = -1
-            for embed in self.leaderboard_embed_list: #  Iterate through all the embeds in the leaderboard embed list and return the index of the embed that is currently being shown in the current leaderboard message.
+            for embed in embed_data: #  Iterate through all the embeds in the leaderboard embed list and return the index of the embed that is currently being shown in the current leaderboard message.
                 if embed.title == message.embeds[0].title: # If the message that was reacted to is the message that currently/supposedly is the message thats supposed to have the leaderboard.
-                    i = self.leaderboard_embed_list.index(embed)
-            if reaction.emoji == '▶' and i != len(self.leaderboard_embed_list) - 1: 
-                await message.edit(embed=self.leaderboard_embed_list[i + 1])
-            elif reaction.emoji == '◀' and i != 0: await message.edit(embed=self.leaderboard_embed_list[i - 1])
+                    i = embed_data.index(embed)
+            if reaction.emoji == '▶' and i != len(embed_data) - 1: 
+                await message.edit(embed=embed_data[i + 1])
+            elif reaction.emoji == '◀' and i != 0: await message.edit(embed=embed_data[i - 1])
             
             await message.remove_reaction(reaction.emoji, user)
 
@@ -543,10 +547,8 @@ class Levelcog(commands.Cog):
                 current_embed_amount = 0
                 while (current_embed_amount < 10 and i < total_count - 1):
                     to_desc = ""
-                    try:
-                        user_dict = self.collection.find_one({'_id' : leaderboard[i]['_id']})
-                    except IndexError:
-                        exit()
+                    user_dict = self.collection.find_one({'_id' : leaderboard[i]['_id']})
+                    
                     user_dict['invites_sent'] = 0
                     for invite in await ctx.guild.invites():
                         if invite.inviter.id == user_dict['_id']:
@@ -560,13 +562,15 @@ class Levelcog(commands.Cog):
                 embed.set_thumbnail(url=ctx.guild.icon_url)
                 embed_list.append(embed)
 
-            if embed_list == []: self.leaderboard_embed_list = None
-            else: self.leaderboard_embed_list = embed_list
             if len(embed_list) > 0:
+                json_data = json.load(open('data.json', 'r'))
+                json_data['embed_data'].append({msg_sent.id : embed_list})
+                with open('data.json', 'w') as f:
+                    json.dump(json_data, f, indent=4)
                 await msg_sent.edit(content=None, embed=embed_list[0])
                 await msg_sent.add_reaction("\U000025c0")
                 await msg_sent.add_reaction("\U000025b6")
-                self.current_leaderboard_message = msg_sent
+                
     
     @commands.command(name='daily_leaderboard')
     async def daily_leaderboard(self, ctx, interactable=True, *args): # Interactable is whether it should be 
@@ -574,10 +578,40 @@ class Levelcog(commands.Cog):
             if interactable:
                 leaderboard = list(self.collection.find({}).sort('daily_messages_sent', pymongo.DESCENDING))
                 total_count = len(leaderboard)
+                embed_list = []
+                first_current_datetime = datetime.now()
+                msg_sent = await ctx.send('Gathering data...')
                 i = 0
-                to_desc = ""
-                while i < total_count - 1:
-                    to_desc += str(i+1) + '. ' + self.bot.get_user(leaderboard[i]['_id']).name + ' :writing_hand:' + str(leaderboard[i]['daily_messages_sent'])    
+                while i < total_count - 1: # Keep making pages as long as there are user entries left, just like the normal/default leaderboard.
+                    embed = discord.Embed(title='Daily Leaderboard ' + "(Showing " + str(i + 1) + " - " + str(total_count) + ")", description='')
+                    current_embed_amount = 0
+                    to_desc = ""
+                    while (current_embed_amount < 10 and i < total_count - 1):
+                        to_desc += str(i+1) + '. ' + self.bot.get_user(leaderboard[i]['_id']).name + ' :writing_hand:' + str(leaderboard[i]['daily_messages_sent']) + '\n'
+                        i += 1
+                        current_embed_amount += 1
+                    embed.description = to_desc
+                    embed.title = embed.title.split('-')[0] + ' - ' + str(embed.description.split('\n')[-2].split('.')[0]) + ')'
+                    embed.set_footer(text = str(first_current_datetime.strftime("%d/%m/%Y %H:%M:%S")))
+                    embed.set_thumbnail(url=ctx.guild.icon_url)
+                    embed_list.append(embed)
+
+                if len(embed_list) > 0:
+                    json_data = json.load(open('data.json', 'r'))
+                    embed_to_json_data = []
+                    for e in embed_list: 
+                        embed_to_json_data.append({
+                            'title' : e.title,
+                            'description' : e.description
+                        })
+                    
+                    json_data['embed_data'][msg_sent.id] = embed_to_json_data
+                    with open('data.json', 'w') as f:
+                        json.dump(json_data, f, indent=4)
+                    await msg_sent.edit(content=None, embed=embed_list[0])
+                    await msg_sent.add_reaction("\U000025c0")
+                    await msg_sent.add_reaction("\U000025b6")    
+                    
             else: # If the leaderboard shouldn't be interactable then it must've been used to send the daily leaderboard in the daily leaderboard channel.
                 if self.daily_leaderboard_channel is None: # So first we make sure that the daily_leaderboard_channel has been set.
                     return
@@ -609,7 +643,15 @@ class Levelcog(commands.Cog):
     @commands.command()
     async def set_daily_messages_leaderboard_channel(self, ctx, channel, *args):
         if not self.check_perms(ctx.author): return 
-        # Implement the rest later.
+        try:
+            channel = self.bot.get_channel(int(channel.replace('<', '').replace('>', '').replace('#', '')))
+        except(Exception): # if there was an error while trying to get the channel
+            await ctx.send('The channel you sent in could not be found!')
+            return
+        json_data = json.load(open('data.json', 'r'))
+        json_data['daily_leaderboard_channel'] = channel.id
+        with open('data.json', 'w') as f:
+            json.dump(json_data, f, indent=4)
 
     @commands.command(name='set_background')
     async def set_background(self, ctx, *args):
