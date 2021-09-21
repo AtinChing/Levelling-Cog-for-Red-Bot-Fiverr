@@ -3,7 +3,7 @@ import urllib.request
 import requests # Used to validate urls (that are sent in by users through commands)
 import discord
 from discord import user
-from discord.ext import commands
+from discord.ext import commands, tasks
 from discord.ext.commands.errors import CommandInvokeError, MemberNotFound
 from discord.utils import get
 from datetime import timedelta
@@ -107,9 +107,13 @@ class Levelcog(commands.Cog):
     def check_perms(self, user : discord.Member): # Takes in a user and checks and returns whether they have server admin perms
         return user.guild_permissions.administrator # Used for all admin-level commands.
 
-    async def give_voice_xp(self, delay): # Voice xp is given per minute, so this function is called every minute to check every single voice channel in the server and give users voice xp accordingly.
-        await asyncio.sleep(delay)
+    @tasks.loop(minutes=1)
+    async def give_voice_xp(self): # Voice xp is given per minute, so this function is called every minute to check every single voice channel in the server and give users voice xp accordingly.
+        print('doing')
+        await self.bot.wait_until_ready()
+        print('doing')
         if self.connected:
+            print('doing')
             for channel in self.bot.guilds[0].voice_channels: # We can just use bot.guilds[0] because the bot is only in 1 server.
                 json_dict = json.load(open('data.json', 'r'))
                 non_bot_members = [] # Non-bot users connected to the voice channel.
@@ -123,7 +127,6 @@ class Levelcog(commands.Cog):
                         if not member.bot and self.collection.find_one({'_id' : member.id}) != None:
                             self.collection.update_one({'_id' : member.id}, {'$inc' : {'voice_xp' : self.voice_xp_rate, 'time_spent_in_vc' : 1}})
                             self.update_user_in_db(member)
-            self.bot.loop.create_task((self.give_voice_xp(60))) # Check and give voice xp again in 1 minute/60 seconds.
 
     async def reset_daily_messages(self, delay):
         await asyncio.sleep(delay)
@@ -142,7 +145,11 @@ class Levelcog(commands.Cog):
         self.bot.loop.create_task((self.reset_monthly_messages((datetime.combine(last_day, time.min) - current_time).total_seconds())))
 
     @commands.Cog.listener()
-    async def on_ready(self): self.bot.loop.create_task((self.give_voice_xp(60)))
+    async def on_ready(self): 
+        #schedule.every().day.at("09:47").do(self.get_daily_leaderboard, False) # Scheduling the daily_leaderboard to be updated everyday.
+        pass
+        #self.bot.loop.create_task((self.give_voice_xp(60)))
+
 
     @commands.Cog.listener()
     async def on_message(self, message : discord.Message):
@@ -190,20 +197,34 @@ class Levelcog(commands.Cog):
     async def on_reaction_add(self, reaction : discord.Reaction, user):
         if user.bot: return
         message : discord.Message = reaction.message
+        message_id = str(message.id)
         json_data = json.load(open('data.json', 'r'))
-        if message.id in json_data['embed_data'] and "Leaderboard" in message.embeds[0].title:
+        if message_id in json_data['embed_data'] and "Leaderboard" in message.embeds[0].title:
             try:
-                embed_data : list = json_data['embed_data'][message.id]
+                embed_data : list = json_data['embed_data'][message_id]
             except(KeyError):
                 await message.remove_reaction(reaction.emoji, user)
                 return
             i = -1
             for embed in embed_data: #  Iterate through all the embeds in the leaderboard embed list and return the index of the embed that is currently being shown in the current leaderboard message.
-                if embed.title == message.embeds[0].title: # If the message that was reacted to is the message that currently/supposedly is the message thats supposed to have the leaderboard.
+                print(embed['title']) 
+                print(message.embeds[0].title)
+                if embed['title'] == message.embeds[0].title: # If the message that was reacted to is the message that currently/supposedly is the message thats supposed to have the leaderboard.
                     i = embed_data.index(embed)
+                    break
+
+            to_embed = message.embeds[0]
+            print(reaction.emoji == '▶')
+            print(i != len(embed_data) - 1)
             if reaction.emoji == '▶' and i != len(embed_data) - 1: 
-                await message.edit(embed=embed_data[i + 1])
-            elif reaction.emoji == '◀' and i != 0: await message.edit(embed=embed_data[i - 1])
+                to_embed.description = embed_data[i + 1]['description']
+                to_embed.title = embed_data[i + 1]['title']
+                
+                await message.edit(embed=to_embed)
+            elif reaction.emoji == '◀' and i != 0: 
+                to_embed.description = embed_data[i - 1]['description']
+                to_embed.title = embed_data[i - 1]['title']
+                await message.edit(embed=to_embed)
             
             await message.remove_reaction(reaction.emoji, user)
 
@@ -573,7 +594,10 @@ class Levelcog(commands.Cog):
                 
     
     @commands.command(name='daily_leaderboard')
-    async def daily_leaderboard(self, ctx, interactable=True, *args): # Interactable is whether it should be 
+    async def daily_leaderboard(self, ctx, *args):
+        await self.get_daily_leaderboard(ctx=ctx)
+
+    async def get_daily_leaderboard(self, interactable=True, ctx=None): 
         if self.connected:
             if interactable:
                 leaderboard = list(self.collection.find({}).sort('daily_messages_sent', pymongo.DESCENDING))
@@ -583,7 +607,7 @@ class Levelcog(commands.Cog):
                 msg_sent = await ctx.send('Gathering data...')
                 i = 0
                 while i < total_count - 1: # Keep making pages as long as there are user entries left, just like the normal/default leaderboard.
-                    embed = discord.Embed(title='Daily Leaderboard ' + "(Showing " + str(i + 1) + " - " + str(total_count) + ")", description='')
+                    embed = discord.Embed(title=f'Daily Leaderboard (Showing {i + 1} - {total_count})', description='')
                     current_embed_amount = 0
                     to_desc = ""
                     while (current_embed_amount < 10 and i < total_count - 1):
@@ -620,9 +644,10 @@ class Levelcog(commands.Cog):
                 to_desc = ""
                 while i < 9:
                     to_desc += str(i+1) + '. ' + self.bot.get_user(leaderboard[i]['_id']).name + ' :writing_hand:' + str(leaderboard[i]['daily_messages_sent'])
+                    i+=1
                 embed = discord.Embed(description=to_desc)
                 embed.set_footer(text = str(datetime.now().strftime("%d/%m/%Y %H:%M:%S")))
-                embed.set_thumbnail(url=ctx.guild.icon_url)
+                embed.set_thumbnail(url=self.bot.guilds[0].icon_url)
                 await self.daily_leaderboard_channel.send(embed=embed)
 
 
