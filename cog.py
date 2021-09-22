@@ -33,7 +33,7 @@ class Levelcog(commands.Cog):
         self.muted_get_xp = json_dict['muted_xp']
         self.deafened_get_xp = json_dict['deafened_xp']
         self.levelfactor = json_dict['level_factor']
-        self.daily_leaderboard_channel = json_dict['daily_leaderboard_channel']
+        self.daily_leaderboard_channel = str(json_dict['daily_leaderboard_channel'])
         self.valid_days = ['sunday', 'monday', 'tuesday', 'wednesday', 'thursday', 'friday', 'saturday']
         self.connect_to_db()
 
@@ -109,11 +109,7 @@ class Levelcog(commands.Cog):
 
     @tasks.loop(minutes=1)
     async def give_voice_xp(self): # Voice xp is given per minute, so this function is called every minute to check every single voice channel in the server and give users voice xp accordingly.
-        print('doing')
-        await self.bot.wait_until_ready()
-        print('doing')
         if self.connected:
-            print('doing')
             for channel in self.bot.guilds[0].voice_channels: # We can just use bot.guilds[0] because the bot is only in 1 server.
                 json_dict = json.load(open('data.json', 'r'))
                 non_bot_members = [] # Non-bot users connected to the voice channel.
@@ -146,10 +142,8 @@ class Levelcog(commands.Cog):
 
     @commands.Cog.listener()
     async def on_ready(self): 
-        #schedule.every().day.at("09:47").do(self.get_daily_leaderboard, False) # Scheduling the daily_leaderboard to be updated everyday.
-        pass
-        #self.bot.loop.create_task((self.give_voice_xp(60)))
-
+        self.give_voice_xp.start()
+        self.update_daily_leaderboard.start()
 
     @commands.Cog.listener()
     async def on_message(self, message : discord.Message):
@@ -591,65 +585,120 @@ class Levelcog(commands.Cog):
                 await msg_sent.edit(content=None, embed=embed_list[0])
                 await msg_sent.add_reaction("\U000025c0")
                 await msg_sent.add_reaction("\U000025b6")
-                
+
+
     
     @commands.command(name='daily_leaderboard')
     async def daily_leaderboard(self, ctx, *args):
-        await self.get_daily_leaderboard(ctx=ctx)
-
-    async def get_daily_leaderboard(self, interactable=True, ctx=None): 
         if self.connected:
-            if interactable:
-                leaderboard = list(self.collection.find({}).sort('daily_messages_sent', pymongo.DESCENDING))
-                total_count = len(leaderboard)
-                embed_list = []
-                first_current_datetime = datetime.now()
-                msg_sent = await ctx.send('Gathering data...')
-                i = 0
-                while i < total_count - 1: # Keep making pages as long as there are user entries left, just like the normal/default leaderboard.
-                    embed = discord.Embed(title=f'Daily Leaderboard (Showing {i + 1} - {total_count})', description='')
-                    current_embed_amount = 0
-                    to_desc = ""
-                    while (current_embed_amount < 10 and i < total_count - 1):
-                        to_desc += str(i+1) + '. ' + self.bot.get_user(leaderboard[i]['_id']).name + ' :writing_hand:' + str(leaderboard[i]['daily_messages_sent']) + '\n'
-                        i += 1
-                        current_embed_amount += 1
-                    embed.description = to_desc
-                    embed.title = embed.title.split('-')[0] + ' - ' + str(embed.description.split('\n')[-2].split('.')[0]) + ')'
-                    embed.set_footer(text = str(first_current_datetime.strftime("%d/%m/%Y %H:%M:%S")))
-                    embed.set_thumbnail(url=ctx.guild.icon_url)
-                    embed_list.append(embed)
-
-                if len(embed_list) > 0:
-                    json_data = json.load(open('data.json', 'r'))
-                    embed_to_json_data = []
-                    for e in embed_list: 
-                        embed_to_json_data.append({
-                            'title' : e.title,
-                            'description' : e.description
-                        })
-                    
-                    json_data['embed_data'][msg_sent.id] = embed_to_json_data
-                    with open('data.json', 'w') as f:
-                        json.dump(json_data, f, indent=4)
-                    await msg_sent.edit(content=None, embed=embed_list[0])
-                    await msg_sent.add_reaction("\U000025c0")
-                    await msg_sent.add_reaction("\U000025b6")    
-                    
-            else: # If the leaderboard shouldn't be interactable then it must've been used to send the daily leaderboard in the daily leaderboard channel.
-                if self.daily_leaderboard_channel is None: # So first we make sure that the daily_leaderboard_channel has been set.
-                    return
-                leaderboard = list(self.collection.find({}).sort('daily_messages_sent', pymongo.DESCENDING).limit(10)) # Only going to return the top 10 results
-                i = 0
+            leaderboard = list(self.collection.find({}).sort('daily_messages_sent', pymongo.DESCENDING))
+            total_count = len(leaderboard)
+            embed_list = []
+            first_current_datetime = datetime.now()
+            msg_sent = await ctx.send('Gathering data...')
+            i = 0
+            while i < total_count - 1: # Keep making pages as long as there are user entries left, just like the normal/default leaderboard.
+                embed = discord.Embed(title=f'Daily Leaderboard (Showing {i + 1} - {total_count})', description='')
+                current_embed_amount = 0
                 to_desc = ""
-                while i < 9:
-                    to_desc += str(i+1) + '. ' + self.bot.get_user(leaderboard[i]['_id']).name + ' :writing_hand:' + str(leaderboard[i]['daily_messages_sent'])
-                    i+=1
-                embed = discord.Embed(description=to_desc)
-                embed.set_footer(text = str(datetime.now().strftime("%d/%m/%Y %H:%M:%S")))
-                embed.set_thumbnail(url=self.bot.guilds[0].icon_url)
-                await self.daily_leaderboard_channel.send(embed=embed)
+                while (current_embed_amount < 10 and i < total_count - 1):
+                    to_desc += str(i+1) + '. ' + self.bot.get_user(leaderboard[i]['_id']).name + ' :writing_hand:' + str(leaderboard[i]['daily_messages_sent']) + '\n'
+                    i += 1
+                    current_embed_amount += 1
+                embed.description = to_desc
+                embed.title = embed.title.split('-')[0] + ' - ' + str(embed.description.split('\n')[-2].split('.')[0]) + ')'
+                embed.set_footer(text = str(first_current_datetime.strftime("%d/%m/%Y %H:%M:%S")))
+                embed.set_thumbnail(url=ctx.guild.icon_url)
+                embed_list.append(embed)
 
+            if len(embed_list) > 0:
+                json_data = json.load(open('data.json', 'r'))
+                embed_to_json_data = []
+                for e in embed_list: 
+                    embed_to_json_data.append({
+                        'title' : e.title,
+                        'description' : e.description
+                    })
+                
+                json_data['embed_data'][msg_sent.id] = embed_to_json_data
+                with open('data.json', 'w') as f:
+                    json.dump(json_data, f, indent=4)
+                await msg_sent.edit(content=None, embed=embed_list[0])
+                await msg_sent.add_reaction("\U000025c0")
+                await msg_sent.add_reaction("\U000025b6")
+
+    @tasks.loop(hours=24)
+    async def update_daily_leaderboard(self, interactable=True, ctx=None): 
+        if self.connected:
+            if self.daily_leaderboard_channel is None: # So first we make sure that the daily_leaderboard_channel has been set.
+                return
+            leaderboard = list(self.collection.find({}).sort('daily_messages_sent', pymongo.DESCENDING).limit(10)) # Only going to return the top 10 results
+            i = 0
+            to_desc = ""
+            while i < 9:
+                to_desc += str(i+1) + '. ' + self.bot.get_user(leaderboard[i]['_id']).name + ' :writing_hand:' + str(leaderboard[i]['daily_messages_sent']) + '\n'
+                i+=1
+            embed = discord.Embed(title = 'Most active users today', description=to_desc)
+            embed.set_footer(text = str(datetime.now().strftime("%d/%m/%Y %H:%M:%S")))
+            embed.set_thumbnail(url=self.bot.guilds[0].icon_url)
+            channel = self.bot.get_channel(int(self.daily_leaderboard_channel.replace('<', '').replace('>', '').replace('#', '')))
+            await channel.send(embed=embed)
+
+    @commands.command(name='monthly_leaderboard')
+    async def monthly_leaderboard(self, ctx, *args):
+        if self.connected:
+            leaderboard = list(self.collection.find({}).sort('monthly_messages_sent', pymongo.DESCENDING))
+            total_count = len(leaderboard)
+            embed_list = []
+            first_current_datetime = datetime.now()
+            msg_sent = await ctx.send('Gathering data...')
+            i = 0
+            while i < total_count - 1: # Keep making pages as long as there are user entries left, just like the normal/default leaderboard.
+                embed = discord.Embed(title=f'Monthly Leaderboard (Showing {i + 1} - {total_count})', description='')
+                current_embed_amount = 0
+                to_desc = ""
+                while (current_embed_amount < 10 and i < total_count - 1):
+                    to_desc += str(i+1) + '. ' + self.bot.get_user(leaderboard[i]['_id']).name + ' :writing_hand:' + str(leaderboard[i]['monthly_messages_sent']) + '\n'
+                    i += 1
+                    current_embed_amount += 1
+                embed.description = to_desc
+                embed.title = embed.title.split('-')[0] + ' - ' + str(embed.description.split('\n')[-2].split('.')[0]) + ')'
+                embed.set_footer(text = str(first_current_datetime.strftime("%d/%m/%Y %H:%M:%S")))
+                embed.set_thumbnail(url=ctx.guild.icon_url)
+                embed_list.append(embed)
+
+            if len(embed_list) > 0:
+                json_data = json.load(open('data.json', 'r'))
+                embed_to_json_data = []
+                for e in embed_list: 
+                    embed_to_json_data.append({
+                        'title' : e.title,
+                        'description' : e.description
+                    })
+                
+                json_data['embed_data'][msg_sent.id] = embed_to_json_data
+                with open('data.json', 'w') as f:
+                    json.dump(json_data, f, indent=4)
+                await msg_sent.edit(content=None, embed=embed_list[0])
+                await msg_sent.add_reaction("\U000025c0")
+                await msg_sent.add_reaction("\U000025b6")
+
+    @tasks.loop()
+    async def update_monthly_leaderboard(self): 
+        if self.connected:
+            if self.daily_leaderboard_channel is None: # So first we make sure that the daily_leaderboard_channel has been set.
+                return
+            leaderboard = list(self.collection.find({}).sort('daily_messages_sent', pymongo.DESCENDING).limit(10)) # Only going to return the top 10 results
+            i = 0
+            to_desc = ""
+            while i < 9:
+                to_desc += str(i+1) + '. ' + self.bot.get_user(leaderboard[i]['_id']).name + ' :writing_hand:' + str(leaderboard[i]['daily_messages_sent']) + '\n'
+                i+=1
+            embed = discord.Embed(title = 'Most active users today', description=to_desc)
+            embed.set_footer(text = str(datetime.now().strftime("%d/%m/%Y %H:%M:%S")))
+            embed.set_thumbnail(url=self.bot.guilds[0].icon_url)
+            channel = self.bot.get_channel(int(self.daily_leaderboard_channel.replace('<', '').replace('>', '').replace('#', '')))
+            await channel.send(embed=embed)
 
     @commands.command()
     async def set_level_up_channel(self, ctx, channel, *args):
