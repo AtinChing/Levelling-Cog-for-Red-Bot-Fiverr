@@ -102,10 +102,19 @@ class Levelcog(commands.Cog):
             self.collection.update_one({'_id' : user.id}, {'$set' : {'level' : self.determine_level(cloned_dict['total_xp'])}}) # Then it updates the users level field, in the db, accordingly with the users total_xp.
         except(Exception):
             self.register_user(user) # Registers user if they weren't in DB.
-        json_data = json.load(open('data.json', 'r'))
         
     def check_perms(self, user : discord.Member): # Takes in a user and checks and returns whether they have server admin perms
         return user.guild_permissions.administrator # Used for all admin-level commands.
+
+    @tasks.loop(hours=1)
+    async def check_month(self):
+        json_data = json.load(open('data.json', 'r'))
+        month = json_data['month']
+        if month != datetime.now().month.lower(): # If the month has changed
+            await self.update_monthly_leaderboard()
+        json_data['month'] = datetime.now().month.lower()
+        with open('data.json', 'r') as f:
+            json.dump(json_data, f, indent=4)
 
     @tasks.loop(minutes=1)
     async def give_voice_xp(self): # Voice xp is given per minute, so this function is called every minute to check every single voice channel in the server and give users voice xp accordingly.
@@ -124,21 +133,20 @@ class Levelcog(commands.Cog):
                             self.collection.update_one({'_id' : member.id}, {'$inc' : {'voice_xp' : self.voice_xp_rate, 'time_spent_in_vc' : 1}})
                             self.update_user_in_db(member)
 
-    async def reset_daily_messages(self, delay):
-        await asyncio.sleep(delay)
+    async def reset_daily_messages(self):
         if self.connected:
             self.collection.update_many({}, {'daily_messages_sent' :  0})
-        current_time = datetime.now()
-        tomorrow = current_time + timedelta(days=1)
-        self.bot.loop.create_task((self.reset_daily_messages((datetime.combine(tomorrow, time.min) - current_time).total_seconds()))) # Calculates the amount of seconds until the day ends, then schedules the reset of all "daily_messages_sent" fields to run after those amount of seconds
+        #current_time = datetime.now()
+        #tomorrow = current_time + timedelta(days=1)
+        #reset_daily_messages((datetime.combine(tomorrow, time.min) - current_time).total_seconds()))) # Calculates the amount of seconds until the day ends, then schedules the reset of all "daily_messages_sent" fields to run after those amount of seconds
 
     async def reset_monthly_messages(self, delay):
         await asyncio.sleep(delay)
         if self.connected:
             self.collection.update_many({}, {'monthly_messages_sent' : 0})
         current_time : datetime = datetime.now()
-        last_day = current_time + timedelta(days=(calendar.monthrange(current_time.year, current_time.month)[1] - current_time.day))  
-        self.bot.loop.create_task((self.reset_monthly_messages((datetime.combine(last_day, time.min) - current_time).total_seconds())))
+        #last_day = current_time + timedelta(days=(calendar.monthrange(current_time.year, current_time.month)[1] - current_time.day))  
+        #self.bot.loop.create_task((self.reset_monthly_messages((datetime.combine(last_day, time.min) - current_time).total_seconds())))
 
     @commands.Cog.listener()
     async def on_ready(self): 
@@ -643,6 +651,7 @@ class Levelcog(commands.Cog):
             embed.set_thumbnail(url=self.bot.guilds[0].icon_url)
             channel = self.bot.get_channel(int(self.daily_leaderboard_channel.replace('<', '').replace('>', '').replace('#', '')))
             await channel.send(embed=embed)
+            await self.reset_daily_messages()
 
     @commands.command(name='monthly_leaderboard')
     async def monthly_leaderboard(self, ctx, *args):
@@ -699,6 +708,7 @@ class Levelcog(commands.Cog):
             embed.set_thumbnail(url=self.bot.guilds[0].icon_url)
             channel = self.bot.get_channel(int(self.daily_leaderboard_channel.replace('<', '').replace('>', '').replace('#', '')))
             await channel.send(embed=embed)
+            await self.reset_monthly_messages()
 
     @commands.command()
     async def set_level_up_channel(self, ctx, channel, *args):
