@@ -576,7 +576,7 @@ class Levelcog(commands.Cog):
                     for invite in await ctx.guild.invites():
                         if invite.inviter.id == user_dict['_id']:
                             user_dict['invites_sent'] += 1
-                    to_desc += str(i + 1) + '. ' + self.bot.get_user(leaderboard[i]['_id']).name + '  :military_medal: ' + str(user_dict['level']) + '\n' + str(user_dict['total_xp']) + " XP  :writing_hand:" + str(user_dict['messages_sent']) + "  :microphone2:" + str(round(user_dict['time_spent_in_vc']/60, 1)) + " :envelope:" + str(user_dict['invites_sent']) + "  :trophy:" + str(user_dict['bonus_xp'])  + '\n'
+                    to_desc += str(i + 1) + '. ' + self.bot.get_user(leaderboard[i]['_id']).name + '  :military_medal: ' + str(user_dict['level']) + '\n' + str(user_dict['total_xp']) + " XP ⬄ :writing_hand:" + str(user_dict['messages_sent']) + ":small_black_square::microphone2:" + str(round(user_dict['time_spent_in_vc']/60, 1)) + ":small_black_square::envelope:" + str(user_dict['invites_sent']) + ":small_black_square::trophy:" + str(user_dict['bonus_xp'])  + '\n'
                     i += 1
                     current_embed_amount += 1
                 embed.description = to_desc
@@ -610,7 +610,7 @@ class Levelcog(commands.Cog):
                 current_embed_amount = 0
                 to_desc = ""
                 while (current_embed_amount < 10 and i < total_count - 1):
-                    to_desc += str(i+1) + '. ' + self.bot.get_user(leaderboard[i]['_id']).name + ' :writing_hand:' + str(leaderboard[i]['daily_messages_sent']) + '\n'
+                    to_desc += str(i+1) + '. ' + self.bot.get_user(leaderboard[i]['_id']).name + ':small_black_square::writing_hand:' + str(leaderboard[i]['daily_messages_sent']) + '\n'
                     i += 1
                     current_embed_amount += 1
                 embed.description = to_desc
@@ -644,7 +644,7 @@ class Levelcog(commands.Cog):
             i = 0
             to_desc = ""
             while i < 9:
-                to_desc += str(i+1) + '. ' + self.bot.get_user(leaderboard[i]['_id']).name + ' :writing_hand:' + str(leaderboard[i]['daily_messages_sent']) + '\n'
+                to_desc += str(i+1) + '. ' + self.bot.get_user(leaderboard[i]['_id']).name + ':small_black_square::writing_hand:' + str(leaderboard[i]['daily_messages_sent']) + '\n'
                 i+=1
             embed = discord.Embed(title = 'Most active users today', description=to_desc)
             embed.set_footer(text = str(datetime.now().strftime("%d/%m/%Y %H:%M:%S")))
@@ -667,7 +667,7 @@ class Levelcog(commands.Cog):
                 current_embed_amount = 0
                 to_desc = ""
                 while (current_embed_amount < 10 and i < total_count - 1):
-                    to_desc += str(i+1) + '. ' + self.bot.get_user(leaderboard[i]['_id']).name + ' :writing_hand:' + str(leaderboard[i]['monthly_messages_sent']) + '\n'
+                    to_desc += str(i+1) + '. ' + self.bot.get_user(leaderboard[i]['_id']).name + ':small_black_square::writing_hand:' + str(leaderboard[i]['monthly_messages_sent']) + '\n'
                     i += 1
                     current_embed_amount += 1
                 embed.description = to_desc
@@ -701,7 +701,7 @@ class Levelcog(commands.Cog):
             i = 0
             to_desc = ""
             while i < 9:
-                to_desc += str(i+1) + '. ' + self.bot.get_user(leaderboard[i]['_id']).name + ' :writing_hand:' + str(leaderboard[i]['daily_messages_sent']) + '\n'
+                to_desc += str(i+1) + '. ' + self.bot.get_user(leaderboard[i]['_id']).name + ':small_black_square::writing_hand:' + str(leaderboard[i]['daily_messages_sent']) + '\n'
                 i+=1
             embed = discord.Embed(title = 'Most active users today', description=to_desc)
             embed.set_footer(text = str(datetime.now().strftime("%d/%m/%Y %H:%M:%S")))
@@ -923,6 +923,21 @@ class Levelcog(commands.Cog):
         background.paste(logo, (0, 0), mask=logo)
         background.save("rankcard1.png")
         await ctx.send(file = discord.File("rankcard1.png"))
+
+    @commands.command()
+    async def import_data(self, ctx, message_id):
+        try:
+            data = await ctx.fetch_message(message_id).embeds[0].description
+        except(Exception):
+            await ctx.send('Sorry, but the data could not be loaded.')
+        data = data.split('\n')
+        i = 1
+        while True:
+            try:
+                print(data[i])
+                i+=1
+            except IndexError:
+                break
 
 def setup(client):
     client.add_cog(Levelcog(client)) 
