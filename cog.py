@@ -135,7 +135,7 @@ class Levelcog(commands.Cog):
 
     async def reset_daily_messages(self):
         if self.connected:
-            self.collection.update_many({}, {'daily_messages_sent' :  0})
+            self.collection.update_many({}, {'$set' : {'daily_messages_sent' :  0}})
         #current_time = datetime.now()
         #tomorrow = current_time + timedelta(days=1)
         #reset_daily_messages((datetime.combine(tomorrow, time.min) - current_time).total_seconds()))) # Calculates the amount of seconds until the day ends, then schedules the reset of all "daily_messages_sent" fields to run after those amount of seconds
@@ -636,15 +636,23 @@ class Levelcog(commands.Cog):
                 await msg_sent.add_reaction("\U000025b6")
 
     @tasks.loop(hours=24)
-    async def update_daily_leaderboard(self, interactable=True, ctx=None): 
+    async def update_daily_leaderboard(self): 
         if self.connected:
             if self.daily_leaderboard_channel is None: # So first we make sure that the daily_leaderboard_channel has been set.
                 return
             leaderboard = list(self.collection.find({}).sort('daily_messages_sent', pymongo.DESCENDING).limit(10)) # Only going to return the top 10 results
             i = 0
             to_desc = ""
-            while i < 9:
-                to_desc += str(i+1) + '. ' + self.bot.get_user(leaderboard[i]['_id']).name + ':small_black_square::writing_hand:' + str(leaderboard[i]['daily_messages_sent']) + '\n'
+            limit = 9
+            offset = 1
+            while i < limit:
+                try:
+                    to_desc += str(i+offset) + '. ' + self.bot.get_user(leaderboard[i]['_id']).name + ':black_small_square::writing_hand:' + str(leaderboard[i]['daily_messages_sent']) + '\n'
+                except(AttributeError): # Attribute error is thrown if the member, that is currently being iterated, is stored in the database but cannot be found
+                    limit+=1 # So we increase the limit by 1 so that it can get enough (10 people) on to the leaderboard.
+                    offset-=1 # And decrease the offset by 1 so that we have accurate position placements.
+                except(IndexError): # If there is an index error then that means that there weren't more than 10 valid members for the leaderboard, so we just break and use the current leaderboard.
+                    break
                 i+=1
             embed = discord.Embed(title = 'Most active users today', description=to_desc)
             embed.set_footer(text = str(datetime.now().strftime("%d/%m/%Y %H:%M:%S")))
@@ -925,19 +933,23 @@ class Levelcog(commands.Cog):
         await ctx.send(file = discord.File("rankcard1.png"))
 
     @commands.command()
-    async def import_data(self, ctx, message_id):
+    async def import_data(self, ctx, message_id : int):
         try:
-            data = await ctx.fetch_message(message_id).embeds[0].description
+            message : discord.Message= await ctx.fetch_message(message_id)
+            data = message.embeds[0].to_dict()
         except(Exception):
             await ctx.send('Sorry, but the data could not be loaded.')
-        data = data.split('\n')
-        i = 1
-        while True:
-            try:
-                print(data[i])
-                i+=1
-            except IndexError:
-                break
+        for field in data['fields']:
+            current_member = {} # Name of current member that has to inserted into db. 
+            for key, value in field.items():
+                value : str = value
+                if key == 'name':
+                    name = value.split('**')[1]
+                    i = name.index(' ') + 1
+                    name = name[i:]
+                    level = int(value.split('\\')[1].replace('🎖',''))
+                    print(name)
+                    print(level)
 
 def setup(client):
     client.add_cog(Levelcog(client)) 
