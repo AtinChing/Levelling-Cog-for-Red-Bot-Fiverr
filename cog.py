@@ -1,4 +1,5 @@
 import asyncio
+from re import split
 import urllib.request
 import requests # Used to validate urls (that are sent in by users through commands)
 import discord
@@ -15,6 +16,8 @@ import json
 import calendar # calendar libraray is used for quick conversion from int (returned by weekday()) to weekday str.
 import distutils.util
 from PIL import Image, ImageDraw, ImageFont
+from discord.utils import get
+
 
 class Levelcog(commands.Cog):   
 
@@ -933,7 +936,7 @@ class Levelcog(commands.Cog):
         await ctx.send(file = discord.File("rankcard1.png"))
 
     @commands.command()
-    async def import_data(self, ctx, message_id : int):
+    async def import_data(self, ctx : commands.Context, message_id : int):
         try:
             message : discord.Message= await ctx.fetch_message(message_id)
             data = message.embeds[0].to_dict()
@@ -948,8 +951,35 @@ class Levelcog(commands.Cog):
                     i = name.index(' ') + 1
                     name = name[i:]
                     level = int(value.split('\\')[1].replace('🎖',''))
-                    print(name)
-                    print(level)
+                    user = get(ctx.guild.members, name=name)
+                    current_member['name'] = name
+                    current_member['_id'] = user.id
+                    current_member['level'] = level
+                    continue
+                if key == 'value':
+                    xp = int(value.split(' ')[0])
+                    split_colon = value.split(':')
+                    messages_sent = int(split_colon[2].replace(' ', ''))
+                    time_in_vc = int(split_colon[6].replace(' ', ''))
+                    invites = int(split_colon[10].replace(' ', ''))
+                    bonus_xp = int(split_colon[18].replace(' ', ''))
+                    current_member['normal_xp'] = xp - bonus_xp
+                    current_member['bonus_xp'] = bonus_xp
+                    current_member['total_xp'] = xp
+                    current_member['voice_xp'] = 0
+                    current_member['time_spent_in_vc'] = time_in_vc
+                    current_member['messages_sent'] = messages_sent
+                    current_member['daily_messages_sent'] = 0
+                    current_member['monthly_messages_sent'] = 0
+                    current_member['background'] = None
+                    continue
+                if self.connected:
+                    if self.collection.find_one({'_id' : current_member['_id']}) is None:
+                        self.collection.insert_one(current_member)
+                    else: self.collection.find_one_and_replace({'_id' :  current_member['_id']}, current_member)
+                elif self.connected and not self.connect_to_db():
+                    await ctx.send('A connection to the database has not been established, and so data cannot be imported.')
+                    break    
 
 def setup(client):
     client.add_cog(Levelcog(client)) 
