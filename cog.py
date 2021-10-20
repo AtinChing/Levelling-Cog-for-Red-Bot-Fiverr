@@ -28,7 +28,7 @@ class Levelcog(commands.Cog):
         self.collection = None
         self.connected = False # Whether the bot is connected to the db.
         json_dict = json.load(open('data.json', 'r'))
-        self.xp_per_message = json_dict['levelfactor']
+        self.xp_per_message = json_dict['xp_per_message']
         self.voice_xp_rate = json_dict['voice_xp_rate']
         self.bonus_xp_rate = json_dict['bonus_xp_rate']
         self.bonus_xp_days = json_dict['bonus_days']
@@ -37,6 +37,7 @@ class Levelcog(commands.Cog):
         self.deafened_get_xp = json_dict['deafened_xp']
         self.levelfactor = json_dict['level_factor']
         self.daily_leaderboard_channel = str(json_dict['daily_leaderboard_channel'])
+        self.monthly_leaderboard_channel = str(json_dict['monthly_leaderboard_channel'])
         self.valid_days = ['sunday', 'monday', 'tuesday', 'wednesday', 'thursday', 'friday', 'saturday']
         self.connect_to_db()
 
@@ -109,14 +110,14 @@ class Levelcog(commands.Cog):
     def check_perms(self, user : discord.Member): # Takes in a user and checks and returns whether they have server admin perms
         return user.guild_permissions.administrator # Used for all admin-level commands.
 
-    @tasks.loop(hours=1)
-    async def check_month(self):
+    @tasks.loop(minutes=1)
+    async def check_month(self): # Checks the month, if it has changed, then it updates the monthly leaderboard.
         json_data = json.load(open('data.json', 'r'))
         month = json_data['month']
-        if month != datetime.now().month.lower(): # If the month has changed
+        if month != datetime.now().strftime('%B').lower(): # If the month has changed
             await self.update_monthly_leaderboard()
-        json_data['month'] = datetime.now().month.lower()
-        with open('data.json', 'r') as f:
+        json_data['month'] = datetime.now().strftime('%B').lower()
+        with open('data.json', 'w') as f:
             json.dump(json_data, f, indent=4)
 
     @tasks.loop(minutes=1)
@@ -143,10 +144,9 @@ class Levelcog(commands.Cog):
         #tomorrow = current_time + timedelta(days=1)
         #reset_daily_messages((datetime.combine(tomorrow, time.min) - current_time).total_seconds()))) # Calculates the amount of seconds until the day ends, then schedules the reset of all "daily_messages_sent" fields to run after those amount of seconds
 
-    async def reset_monthly_messages(self, delay):
-        await asyncio.sleep(delay)
+    async def reset_monthly_messages(self):
         if self.connected:
-            self.collection.update_many({}, {'monthly_messages_sent' : 0})
+            self.collection.update_many({}, {'$set' : {'monthly_messages_sent' : 0}})
         current_time : datetime = datetime.now()
         #last_day = current_time + timedelta(days=(calendar.monthrange(current_time.year, current_time.month)[1] - current_time.day))  
         #self.bot.loop.create_task((self.reset_monthly_messages((datetime.combine(last_day, time.min) - current_time).total_seconds())))
@@ -154,6 +154,7 @@ class Levelcog(commands.Cog):
     @commands.Cog.listener()
     async def on_ready(self): 
         self.give_voice_xp.start()
+        self.check_month.start()
         self.update_daily_leaderboard.start()
 
     @commands.Cog.listener()
@@ -165,7 +166,9 @@ class Levelcog(commands.Cog):
             self.collection.update_one({'_id' : author.id}, {'$inc' : {'messages_sent' : 1, 'daily_messages_sent' : 1, 'monthly_messages_sent' : 1}}) # Increasing the messages_sent, daily_messages_sent and monthly_messages_sent field by 1 because they have to be increased no matter what condition (except for whether the bot is connected to the database of course).
             entry = self.collection.find_one({'_id' : author.id}) 
             json_data = json.load(open('data.json', 'r'))
-            time_diff = datetime.now() - datetime.fromisoformat(json_data['last_messages'][str(author.id)]) # The difference in time/time passed between the last message the user sent and the message they just sent.
+            if str(author.id) in json_data['last_messages']:
+                time_diff = datetime.now() - datetime.fromisoformat(json_data['last_messages'][str(author.id)]) # The difference in time/time passed between the last message the user sent and the message they just sent.
+            else: time_diff = timedelta(seconds=11) # Just setting time_diff to a timedelta which is 11 seconds if the bot doesn't have the time (at which the user's last message was sent) stored in the json. This is done to make sure the user gets the xp, as seen below.
             old_user_level = self.collection.find_one({'_id' : author.id})['level']
             json_data['last_messages'][str(author.id)] =  str(datetime.now()) # Updating the last_message entry in the json.
             if entry != None and message.channel.id not in json_data['blacklisted']['channels'] and message.channel.category_id not in json_data['blacklisted']['categories'] and time_diff >= timedelta(seconds=10): # If the entry could be extracted from the database and if the channel or category the message was sent isn't blacklisted.
@@ -248,6 +251,7 @@ class Levelcog(commands.Cog):
         if not self.check_perms(ctx.author): return
         embed : discord.Embed = discord.Embed(title="Members added to the database", description='') # Embed that stores all the members added to the database.
         for m in self.bot.guilds[0].members: # Bot is only in 1 server/guild thats why we can use self.bot.guilds[0]
+            if m.bot: continue
             if self.collection.find_one({'_id' : m.id}) == None: # If the member could not be found in the db, then find_one() returns NoneType, so that's how we know the member doesn't exist in the db.
                 if self.connected: # Registering user into db. If they can't then that means a connection to the db couldn't be established
                     self.register_user(m)
@@ -398,7 +402,7 @@ class Levelcog(commands.Cog):
         # Updates the levelfactor field in data.json, so that it's value is used as the xp/levelfactor when the bot is started up next time. 
         with open('data.json', 'r') as file: # Creates temp dict object to hold all the values
             temp_dict = json.load(file) 
-        temp_dict['levelfactor'] = xp # Updates levelfactor value in cloned dict object
+        temp_dict['xp_per_message'] = xp # Updates levelfactor value in cloned dict object
         with open('data.json', 'w') as file: # Sets data.json to the newly updated cloned dict
             json.dump(temp_dict, file, indent=4)
         await ctx.send('The amount of xp given per message has been set to ' + str(xp))
@@ -413,10 +417,10 @@ class Levelcog(commands.Cog):
             await ctx.send('The rate you sent in is an invalid number!')
             return
         self.bonus_xp_rate = rate
-        # Updates the levelfactor field in data.json, so that it's value is used as the xp/levelfactor when the bot is started up next time. 
-        temp_dict = json.load('data.json', 'r') # Creates temp dict object to hold all the values
-        temp_dict['bonus_xp_rate'] = rate # Updates levelfactor value in cloned dict object
-        with open('data.json', 'w') as file: # Sets data.json to the newly updated cloned dict
+        # Updates the bonus_xp_rate field in data.json
+        temp_dict = json.load('data.json', 'r') 
+        temp_dict['bonus_xp_rate'] = rate 
+        with open('data.json', 'w') as file:
             json.dump(temp_dict, file, indent=4)
         await ctx.send('The rate of bonus xp has been set to ' + str(rate))    
 
@@ -571,15 +575,16 @@ class Levelcog(commands.Cog):
             while i < total_count - 1: # Keep making pages as long as there are user entries left.
                 embed = discord.Embed(title='Leaderboard ' + "(Showing " + str(i + 1) + " - " + str(total_count) + ")", description='')
                 current_embed_amount = 0
+                to_desc = ""
                 while (current_embed_amount < 10 and i < total_count - 1):
-                    to_desc = ""
+                    
                     user_dict = self.collection.find_one({'_id' : leaderboard[i]['_id']})
                     
                     user_dict['invites_sent'] = 0
                     for invite in await ctx.guild.invites():
                         if invite.inviter.id == user_dict['_id']:
                             user_dict['invites_sent'] += 1
-                    to_desc += str(i + 1) + '. ' + self.bot.get_user(leaderboard[i]['_id']).name + '  :military_medal: ' + str(user_dict['level']) + '\n' + str(user_dict['total_xp']) + " XP ⬄ :writing_hand:" + str(user_dict['messages_sent']) + ":small_black_square::microphone2:" + str(round(user_dict['time_spent_in_vc']/60, 1)) + ":small_black_square::envelope:" + str(user_dict['invites_sent']) + ":small_black_square::trophy:" + str(user_dict['bonus_xp'])  + '\n'
+                    to_desc += str(i + 1) + '. ' + self.bot.get_user(leaderboard[i]['_id']).name + '  :military_medal: ' + str(user_dict['level']) + '\n' + str(user_dict['total_xp']) + " XP ⬄ :writing_hand:" + str(user_dict['messages_sent']) + ":black_small_square::microphone2:" + str(round(user_dict['time_spent_in_vc']/60, 1)) + ":black_small_square::envelope:" + str(user_dict['invites_sent']) + ":black_small_square::trophy:" + str(user_dict['bonus_xp'])  + '\n'
                     i += 1
                     current_embed_amount += 1
                 embed.description = to_desc
@@ -590,14 +595,18 @@ class Levelcog(commands.Cog):
 
             if len(embed_list) > 0:
                 json_data = json.load(open('data.json', 'r'))
-                json_data['embed_data'].append({msg_sent.id : embed_list})
+                embed_to_json_data = []
+                for e in embed_list: 
+                    embed_to_json_data.append({
+                        'title' : e.title,
+                        'description' : e.description
+                    })
+                json_data['embed_data'][msg_sent.id] = embed_to_json_data
                 with open('data.json', 'w') as f:
                     json.dump(json_data, f, indent=4)
                 await msg_sent.edit(content=None, embed=embed_list[0])
                 await msg_sent.add_reaction("\U000025c0")
                 await msg_sent.add_reaction("\U000025b6")
-
-
     
     @commands.command(name='daily_leaderboard')
     async def daily_leaderboard(self, ctx, *args):
@@ -613,7 +622,7 @@ class Levelcog(commands.Cog):
                 current_embed_amount = 0
                 to_desc = ""
                 while (current_embed_amount < 10 and i < total_count - 1):
-                    to_desc += str(i+1) + '. ' + self.bot.get_user(leaderboard[i]['_id']).name + ':small_black_square::writing_hand:' + str(leaderboard[i]['daily_messages_sent']) + '\n'
+                    to_desc += str(i+1) + '. ' + self.bot.get_user(leaderboard[i]['_id']).name + ':black_small_square::writing_hand:' + str(leaderboard[i]['daily_messages_sent']) + '\n'
                     i += 1
                     current_embed_amount += 1
                 embed.description = to_desc
@@ -639,11 +648,12 @@ class Levelcog(commands.Cog):
                 await msg_sent.add_reaction("\U000025b6")
 
     @tasks.loop(hours=24)
-    async def update_daily_leaderboard(self): 
+    async def update_daily_leaderboard(self): # Updates the daily leaderboard message in the daily leaderboard channel.
         if self.connected:
             if self.daily_leaderboard_channel is None: # So first we make sure that the daily_leaderboard_channel has been set.
                 return
             leaderboard = list(self.collection.find({}).sort('daily_messages_sent', pymongo.DESCENDING).limit(10)) # Only going to return the top 10 results
+            if len(leaderboard) == 0: return
             i = 0
             to_desc = ""
             limit = 9
@@ -678,7 +688,7 @@ class Levelcog(commands.Cog):
                 current_embed_amount = 0
                 to_desc = ""
                 while (current_embed_amount < 10 and i < total_count - 1):
-                    to_desc += str(i+1) + '. ' + self.bot.get_user(leaderboard[i]['_id']).name + ':small_black_square::writing_hand:' + str(leaderboard[i]['monthly_messages_sent']) + '\n'
+                    to_desc += str(i+1) + '. ' + self.bot.get_user(leaderboard[i]['_id']).name + ':black_small_square::writing_hand:' + str(leaderboard[i]['monthly_messages_sent']) + '\n'
                     i += 1
                     current_embed_amount += 1
                 embed.description = to_desc
@@ -703,21 +713,19 @@ class Levelcog(commands.Cog):
                 await msg_sent.add_reaction("\U000025c0")
                 await msg_sent.add_reaction("\U000025b6")
 
-    @tasks.loop()
-    async def update_monthly_leaderboard(self): 
+    async def update_monthly_leaderboard(self): # Updates the monthly leaderboard message in the monthly leaderboard channel.
         if self.connected:
-            if self.daily_leaderboard_channel is None: # So first we make sure that the daily_leaderboard_channel has been set.
-                return
-            leaderboard = list(self.collection.find({}).sort('daily_messages_sent', pymongo.DESCENDING).limit(10)) # Only going to return the top 10 results
+            if self.monthly_leaderboard_channel is None: return # So first we make sure that the monthly_leaderboard_channel has been set.
+            leaderboard = list(self.collection.find({}).sort('monthly_messages_sent', pymongo.DESCENDING).limit(10)) # Only going to return the top 10 results
             i = 0
             to_desc = ""
             while i < 9:
-                to_desc += str(i+1) + '. ' + self.bot.get_user(leaderboard[i]['_id']).name + ':small_black_square::writing_hand:' + str(leaderboard[i]['daily_messages_sent']) + '\n'
+                to_desc += str(i+1) + '. ' + self.bot.get_user(leaderboard[i]['_id']).name + ':black_small_square::writing_hand:' + str(leaderboard[i]['monthly_messages_sent']) + '\n'
                 i+=1
-            embed = discord.Embed(title = 'Most active users today', description=to_desc)
+            embed = discord.Embed(title = 'Most active users this month', description=to_desc)
             embed.set_footer(text = str(datetime.now().strftime("%d/%m/%Y %H:%M:%S")))
             embed.set_thumbnail(url=self.bot.guilds[0].icon_url)
-            channel = self.bot.get_channel(int(self.daily_leaderboard_channel.replace('<', '').replace('>', '').replace('#', '')))
+            channel = self.bot.get_channel(int(self.monthly_leaderboard_channel.replace('<', '').replace('>', '').replace('#', '')))
             await channel.send(embed=embed)
             await self.reset_monthly_messages()
 
@@ -734,9 +742,8 @@ class Levelcog(commands.Cog):
         with open('data.json', 'w') as f:
             json.dump(json_data, f, indent=4)
 
-
     @commands.command()
-    async def set_daily_messages_leaderboard_channel(self, ctx, channel, *args):
+    async def set_daily_leaderboard_channel(self, ctx, channel, *args):
         if not self.check_perms(ctx.author): return 
         try:
             channel = self.bot.get_channel(int(channel.replace('<', '').replace('>', '').replace('#', '')))
@@ -747,6 +754,21 @@ class Levelcog(commands.Cog):
         json_data['daily_leaderboard_channel'] = channel.id
         with open('data.json', 'w') as f:
             json.dump(json_data, f, indent=4)
+        await ctx.send(f'Set the daily leaderboard channel to {channel.mention}!')
+
+    @commands.command()
+    async def set_monthly_leaderboard_channel(self, ctx, channel, *args):
+        if not self.check_perms(ctx.author): return 
+        try:
+            channel = self.bot.get_channel(int(channel.replace('<', '').replace('>', '').replace('#', '')))
+        except(Exception): # If there was an error while trying to get the channel
+            await ctx.send('The channel you sent in could not be found!')
+            return
+        json_data = json.load(open('data.json', 'r'))
+        json_data['monthly_leaderboard_channel'] = channel.id
+        with open('data.json', 'w') as f:
+            json.dump(json_data, f, indent=4)
+        await ctx.send(f'Set the monthly leaderboard channel to {channel.mention}!')
 
     @commands.command(name='set_background')
     async def set_background(self, ctx, *args):
@@ -937,13 +959,13 @@ class Levelcog(commands.Cog):
 
     @commands.command()
     async def import_data(self, ctx : commands.Context, message_id : int):
-        try:
-            message : discord.Message= await ctx.fetch_message(message_id)
-            data = message.embeds[0].to_dict()
-        except(Exception):
-            await ctx.send('Sorry, but the data could not be loaded.')
+        message = await ctx.fetch_message(message_id)
+        data = message.embeds[0].to_dict()
+        guild = message.guild
+        channel = message.channel
+        
         for field in data['fields']:
-            current_member = {} # Name of current member that has to inserted into db. 
+            current_member = {} 
             for key, value in field.items():
                 value : str = value
                 if key == 'name':
@@ -951,7 +973,7 @@ class Levelcog(commands.Cog):
                     i = name.index(' ') + 1
                     name = name[i:]
                     level = int(value.split('\\')[1].replace('🎖',''))
-                    user = get(ctx.guild.members, name=name)
+                    user = get(guild.members, name=name)
                     current_member['name'] = name
                     current_member['_id'] = user.id
                     current_member['level'] = level
@@ -977,9 +999,11 @@ class Levelcog(commands.Cog):
                     if self.collection.find_one({'_id' : current_member['_id']}) is None:
                         self.collection.insert_one(current_member)
                     else: self.collection.find_one_and_replace({'_id' :  current_member['_id']}, current_member)
-                elif self.connected and not self.connect_to_db():
-                    await ctx.send('A connection to the database has not been established, and so data cannot be imported.')
-                    break    
+                elif not self.connected and not self.connect_to_db():
+                    await channel.send('A connection to the database has not been established, and so data cannot be imported.')
+                    return   
+        await channel.send(f'Data has been imported!')
 
+    
 def setup(client):
     client.add_cog(Levelcog(client)) 

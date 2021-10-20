@@ -16,4 +16,4 @@ async def unload(ctx, extension):
 
 bot.load_extension('cog') # Loading cog by default without need of commands.
 
-bot.run('ODQwOTc1NTk0OTUwMzYxMDg4.YJgBjg.AbNi7Lgz3przn5O1TmoI5why53w')
+bot.run('ODQwOTc1NTk0OTUwMzYxMDg4.YJgBjg.26luccinvUzAVKSeE2gXY3Zyopk')

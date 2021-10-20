@@ -1,5 +1,5 @@
 {
-    "levelfactor": 20,
+    "xp_per_message": 20,
     "bonus_xp_rate": 2,
     "voice_xp_rate": 5,
     "solo_xp": true,
@@ -7,8 +7,9 @@
     "deafened_xp": false,
     "level_factor": 150,
     "level_up_channel": 868919518934732820,
-    "daily_leaderboard_channel": 868919518934732820,
-    "month": null,
+    "daily_leaderboard_channel": 900315777603883039,
+    "monthly_leaderboard_channel": 900314653467508796,
+    "month": "october",
     "embed_data": {
         "889255170574274620": [
             {
@@ -163,6 +164,56 @@
                 "title": "Daily Leaderboard (Showing 21  - 22)",
                 "description": "21. Moderation bot test :writing_hand:0\n22. MongoDB Service :writing_hand:0\n"
             }
+        ],
+        "900311178717323314": [
+            {
+                "title": "Leaderboard (Showing 1  - 10)",
+                "description": "10. unknownmeu  :military_medal: 1\n6 XP \u2b04 :writing_hand:1:small_black_square::microphone2:0.0:small_black_square::envelope:0:small_black_square::trophy:0\n"
+            },
+            {
+                "title": "Leaderboard (Showing 11  - 11)",
+                "description": "11. GenZ Memes  :military_medal: 1\n6 XP \u2b04 :writing_hand:1:small_black_square::microphone2:0.0:small_black_square::envelope:0:small_black_square::trophy:0\n"
+            }
+        ],
+        "900312420269056010": [
+            {
+                "title": "Daily Leaderboard (Showing 1  - 10)",
+                "description": "1. dependable, have a nice day:small_black_square::writing_hand:0\n2. jasoos:small_black_square::writing_hand:0\n3. Bronsen:small_black_square::writing_hand:0\n4. IG AC 1:small_black_square::writing_hand:0\n5. Pikachuuu:small_black_square::writing_hand:0\n6. kang:small_black_square::writing_hand:0\n7. Burger Juice:small_black_square::writing_hand:0\n8. AC TEST:small_black_square::writing_hand:0\n9. DANIEL!:small_black_square::writing_hand:0\n10. unknownmeu:small_black_square::writing_hand:0\n"
+            },
+            {
+                "title": "Daily Leaderboard (Showing 11  - 11)",
+                "description": "11. GenZ Memes:small_black_square::writing_hand:0\n"
+            }
+        ],
+        "900312676968828970": [
+            {
+                "title": "Daily Leaderboard (Showing 1  - 10)",
+                "description": "1. dependable, have a nice day:black_small_square::writing_hand:0\n2. jasoos:black_small_square::writing_hand:0\n3. Bronsen:black_small_square::writing_hand:0\n4. IG AC 1:black_small_square::writing_hand:0\n5. Pikachuuu:black_small_square::writing_hand:0\n6. kang:black_small_square::writing_hand:0\n7. Burger Juice:black_small_square::writing_hand:0\n8. AC TEST:black_small_square::writing_hand:0\n9. DANIEL!:black_small_square::writing_hand:0\n10. unknownmeu:black_small_square::writing_hand:0\n"
+            },
+            {
+                "title": "Daily Leaderboard (Showing 11  - 11)",
+                "description": "11. GenZ Memes:black_small_square::writing_hand:0\n"
+            }
+        ],
+        "900313268382498836": [
+            {
+                "title": "Leaderboard (Showing 1  - 10)",
+                "description": "1. dependable, have a nice day  :military_medal: 5\n2306 XP \u2b04 :writing_hand:299:black_small_square::microphone2:0.0:black_small_square::envelope:1:black_small_square::trophy:400\n2. jasoos  :military_medal: 1\n192 XP \u2b04 :writing_hand:32:black_small_square::microphone2:0.0:black_small_square::envelope:0:black_small_square::trophy:0\n3. Bronsen  :military_medal: 1\n18 XP \u2b04 :writing_hand:3:black_small_square::microphone2:0.0:black_small_square::envelope:0:black_small_square::trophy:0\n4. IG AC 1  :military_medal: 1\n12 XP \u2b04 :writing_hand:2:black_small_square::microphone2:0.0:black_small_square::envelope:0:black_small_square::trophy:0\n5. Pikachuuu  :military_medal: 1\n12 XP \u2b04 :writing_hand:2:black_small_square::microphone2:0.0:black_small_square::envelope:0:black_small_square::trophy:0\n6. kang  :military_medal: 1\n6 XP \u2b04 :writing_hand:1:black_small_square::microphone2:0.0:black_small_square::envelope:0:black_small_square::trophy:0\n7. Burger Juice  :military_medal: 1\n6 XP \u2b04 :writing_hand:1:black_small_square::microphone2:0.0:black_small_square::envelope:0:black_small_square::trophy:0\n8. AC TEST  :military_medal: 1\n6 XP \u2b04 :writing_hand:1:black_small_square::microphone2:0.0:black_small_square::envelope:0:black_small_square::trophy:0\n9. DANIEL!  :military_medal: 1\n6 XP \u2b04 :writing_hand:1:black_small_square::microphone2:0.0:black_small_square::envelope:0:black_small_square::trophy:0\n10. unknownmeu  :military_medal: 1\n6 XP \u2b04 :writing_hand:1:black_small_square::microphone2:0.0:black_small_square::envelope:0:black_small_square::trophy:0\n"
+            },
+            {
+                "title": "Leaderboard (Showing 11  - 11)",
+                "description": "11. GenZ Memes  :military_medal: 1\n6 XP \u2b04 :writing_hand:1:black_small_square::microphone2:0.0:black_small_square::envelope:0:black_small_square::trophy:0\n"
+            }
+        ],
+        "900313532841746462": [
+            {
+                "title": "Monthly Leaderboard (Showing 1  - 10)",
+                "description": "1. dependable, have a nice day:black_small_square::writing_hand:8\n2. jasoos:black_small_square::writing_hand:0\n3. Bronsen:black_small_square::writing_hand:0\n4. IG AC 1:black_small_square::writing_hand:0\n5. Pikachuuu:black_small_square::writing_hand:0\n6. kang:black_small_square::writing_hand:0\n7. Burger Juice:black_small_square::writing_hand:0\n8. AC TEST:black_small_square::writing_hand:0\n9. DANIEL!:black_small_square::writing_hand:0\n10. unknownmeu:black_small_square::writing_hand:0\n"
+            },
+            {
+                "title": "Monthly Leaderboard (Showing 11  - 11)",
+                "description": "11. GenZ Memes:black_small_square::writing_hand:0\n"
+            }
         ]
     },
     "bonus_days": [
@@ -173,7 +224,19 @@
         "categories": []
     },
     "last_messages": {
-        "244361629754458113": "2021-10-10 23:31:55.537447"
+        "244361629754458113": "2021-10-20 13:29:42.970680",
+        "737281018389856286": "2021-10-16 11:07:56.196301",
+        "737279449845858396": "2021-10-16 11:08:11.860120",
+        "737054904174116864": "2021-10-16 11:08:16.370379",
+        "814248038460686387": "2021-10-16 11:08:23.556116",
+        "737280252560146453": "2021-10-16 11:09:23.461251",
+        "224868711088128000": "2021-10-16 11:23:02.833949",
+        "898848268690288670": "2021-10-16 11:25:42.983822",
+        "898849529800040449": "2021-10-16 11:28:37.540109",
+        "898857652065562674": "2021-10-16 12:01:38.139159",
+        "898858942917144596": "2021-10-16 12:06:30.778078",
+        "898860295991210064": "2021-10-16 12:11:07.122271",
+        "898861399713906738": "2021-10-16 12:15:43.416850"
     },
     "roles": [
         {
